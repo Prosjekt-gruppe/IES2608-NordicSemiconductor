@@ -1,0 +1,21 @@
+/*
+ * SPDX-License-Identifier: LicenseRef-Nordic-5-Clause
+ * 
+ * Board overlay for Thingy:91 X with NTN support
+ */
+
+/* Configure UART for console and AT command interface */
+&uart0 {
+	status = "okay";
+	current-speed = <115200>;
+};
+
+/* Configure I2C for sensors (optional for future position tracking) */
+&i2c2 {
+	status = "okay";
+};
+
+/* Configure GPIO for status LEDs */
+&gpio0 {
+	status = "okay";
+};
