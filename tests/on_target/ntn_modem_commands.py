@@ -26,7 +26,9 @@ class NTNModemCommander:
         "modem_uuid": "AT%XMODEMUUID",
         "psm_status": "AT+CPSMS?",
         "edrx_status": "AT+CEDRXS?",
-        "set_ntn_mode": "AT%XSYSTEMMODE=1,0,1,0",  # LTE-M with GPS
+        # AT%XSYSTEMMODE=<LTE_M_support>,<NB_IoT_support>,<GNSS_support>,<LTE_preference>
+        # Parameters: 1=LTE-M enabled, 0=NB-IoT disabled, 1=GNSS enabled, 0=no preference
+        "set_ntn_mode": "AT%XSYSTEMMODE=1,0,1,0",
         "enable_psm": "AT+CPSMS=1",
         "enable_edrx": "AT+CEDRXS=1",
     }

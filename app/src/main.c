@@ -73,7 +73,9 @@ static int ntn_modem_init(void)
 		LOG_WRN("Failed to get modem UUID: %d", err);
 	}
 
-	/* Set system mode to NB-IoT/LTE-M with GNSS */
+	/* Set system mode to LTE-M with GNSS
+	 * Note: Use LTE_LC_SYSTEM_MODE_LTEM if _GPS variant is not available
+	 */
 	err = lte_lc_system_mode_set(LTE_LC_SYSTEM_MODE_LTEM_GPS, 
 				     LTE_LC_SYSTEM_MODE_PREFER_AUTO);
 	if (err) {
