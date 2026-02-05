@@ -15,12 +15,13 @@ then
 bash Miniforge3-Linux-x86_64.sh -b -p ~/miniforge3
 ```
 
-finally activate the environment (if you are using bash or zsh in your terminal) by running:
+finally activate the environment (if you are using zsh, replace `zsh` with `bash` if you use bash) by running:
 
 ```bash
-conda init "$(basename "$SHELL")"
+~/miniforge3/bin/conda init zsh
 ```
 
+Close and reopen terminal then proceed with creating the environment.
 
 # Create the Environment
 Install the environment by entering the following command, in the current directory.
