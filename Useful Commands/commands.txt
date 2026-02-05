@@ -1,2 +1,4 @@
 GNSS Modem command for Nordic location
 AT%LOCATION=2,"63.42161953911963","10.437708603209801","0",10,0
+
+Hello world
