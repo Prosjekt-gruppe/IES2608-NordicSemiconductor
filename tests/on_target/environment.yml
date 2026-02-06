@@ -6,6 +6,8 @@ dependencies:
   - python=3.10
   - pip
   - pytest
+  - west
+  - pyelftools
   - pyserial
   - pandas
   - plotly

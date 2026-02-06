@@ -40,3 +40,5 @@ fp-info-cache
 *.kicad_prl
 
 build*/
+__pycache__*/
+.pytest_cache*/
