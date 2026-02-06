@@ -41,3 +41,4 @@ fp-info-cache
 
 build*/
 .vscode*/
+settings.json*/
