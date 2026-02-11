@@ -39,9 +39,16 @@ fp-info-cache
 # Local project settings
 *.kicad_prl
 
-#Nordic settings
+# General
+*.o
+*.d
+
+# Nordic settings
 build*/
 
-# VsCode settings
-.vscode*/
-settings.json*/
+# VSCode settings
+.vscode/
+
+# Python
+.pytest_cache/
+__pycache__/
