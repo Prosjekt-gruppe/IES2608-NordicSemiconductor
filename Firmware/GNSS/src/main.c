@@ -1,7 +1,6 @@
 #include <stdio.h>
 #include <ncs_version.h>
 #include <zephyr/kernel.h>
-
 #include <zephyr/logging/log.h>
 #include <modem/nrf_modem_lib.h>
 #include <modem/lte_lc.h>
