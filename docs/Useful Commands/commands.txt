@@ -1,2 +1,27 @@
 GNSS Modem command for Nordic location
 AT%LOCATION=2,"63.42161953911963","10.437708603209801","0",10,0
+
+// 1. Put the radio in flight mode
+AT+CFUN=4
+
+// 2. Enable GNSS to get a fix
+AT%XSYSTEMMODE=0,0,1,0,0
+
+// 3. Start the GNSS scan (necessary for satellite connection)
+AT#XGPS=1,0,0,0
+
+// 4. (Wait for GNSS fix, then stop)
+AT#XGPS=0
+
+// 5. Disable radio before switching mode
+AT+CFUN=0
+
+// 6. Enable NTN mode (NB-IoT over satellite)
+AT%XSYSTEMMODE=0,0,0,0,1
+
+// 7. Lock the modem to specific NTN bands (e.g., 255 for L-band, 256 for S-band)
+AT%XBANDLOCK=2,,"23,255,256"
+
+// 8. Set the network registration (if required by provider)
+AT+CFUN=1
+
