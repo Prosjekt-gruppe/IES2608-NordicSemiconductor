@@ -7,6 +7,3 @@ For now here is list over what the applications do:
 **LTE**: Gets GNSS fix while LTE-m is active. This GNSS fix is sent to an echo server when a button is pressed. Uses PSM and eDRX to give GNSS access to the antenna.
 
 **NTN**: Will be used for NTN testing, but has not yet been made.
-
-
-<span style="color: blue;">This text is blue.</span>
