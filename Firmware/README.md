@@ -2,8 +2,11 @@ The files here are name constrained due to the 250 character limit, therefore th
 
 For now here is list over what the applications do:
 
-GNSS: Gets GNSS fix and prints it to serial
+**GNSS**: Gets GNSS fix and prints it to serial
 
-LTE: Gets GNSS fix while LTE-m is active. This GNSS fix is sent to an echo server when a button is pressed. Uses PSM and eDRX to give GNSS access to the antenna.
+**LTE**: Gets GNSS fix while LTE-m is active. This GNSS fix is sent to an echo server when a button is pressed. Uses PSM and eDRX to give GNSS access to the antenna.
 
-NTN: Will be used for NTN testing, but has not yet been made.
+**NTN**: Will be used for NTN testing, but has not yet been made.
+
+
+<span style="color: blue;">This text is blue.</span>
