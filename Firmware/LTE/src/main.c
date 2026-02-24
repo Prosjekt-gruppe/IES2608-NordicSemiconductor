@@ -1,3 +1,5 @@
+//Currently working on "intelligent modem". This will notice when the signal strength of LTE-M is deteriorating and will initiate the swap to NTN
+
 #include <stdio.h>
 #include <ncs_version.h>
 #include <zephyr/kernel.h>
@@ -154,6 +156,11 @@ static int modem_configure(void)
 	k_sem_take(&lte_connected, K_FOREVER);
 	LOG_INF("Connected to LTE network");
 	dk_set_led_on(DK_LED2);
+
+	err = modem_info_init();
+	if (err) {
+		LOG_ERR("Failed to initialize modem info library, error: %d", err);
+	}
 
 	return 0;
 }
