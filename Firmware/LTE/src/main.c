@@ -107,9 +107,16 @@ static void lte_handler(const struct lte_lc_evt *const evt)
 		k_sem_give(&lte_connected);
 		break;
 	case LTE_LC_EVT_RRC_UPDATE:
-		LOG_INF("RRC mode: %s",
-				evt->rrc_mode == LTE_LC_RRC_MODE_CONNECTED ?
-				"Connected" : "Idle");
+		if (evt->rrc_mode == LTE_LC_RRC_MODE_CONNECTED) {
+			atomic_set(&rrc_connected, 1);
+			LOG_INF("RRC connection status: Connected");
+			k_work_schedule(&sig_work, K_SECONDS(10));
+			}
+		else {
+			atomic_set(&rrc_connected, 0);
+			k_work_cancel_delayable(&sig_work);
+			LOG_INF("RRC connection status: Idle");
+		}
 		break;
 	case LTE_LC_EVT_PSM_UPDATE:
 		LOG_INF("PSM parameter update: Periodic TAU: %d s, Active time: %d s",
@@ -315,6 +322,7 @@ int main(void)
 		LOG_ERR("Failed to configure the modem");
 		return 0;
 	}
+	k_work_init_delayable(&sig_work, sig_work_fn);
 
 	if (dk_buttons_init(button_handler) != 0) {
 		LOG_ERR("Failed to initialize the buttons library");
