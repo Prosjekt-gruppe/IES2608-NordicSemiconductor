@@ -29,6 +29,9 @@ static int sock;
 static struct sockaddr_storage server;
 static uint8_t recv_buf[MESSAGE_SIZE];
 
+static struct k_work_delayable sig_work;
+static atomic_t rrc_connected;
+
 static K_SEM_DEFINE(lte_connected, 0, 1);
 
 LOG_MODULE_REGISTER(ArneTracking, LOG_LEVEL_INF);
@@ -274,6 +277,28 @@ static void button_handler(uint32_t button_state, uint32_t has_changed)
 		}
 		break;
 	}
+}
+
+static void sig_work_fn(struct k_work *work)
+{
+	ARG_UNUSED(work);
+
+	if (!atomic_get(&rrc_connected)) {
+		LOG_INF("RRC not connected, skipping signal strength check");
+		return;
+	}
+
+	int rsrp, snr;
+
+	if (modem_info_get_rsrp(&rsrp) == 0) {
+		LOG_INF("Current RSRP: %d dBm", rsrp);
+	}
+
+	if (modem_info_get_snr(&snr) == 0) {
+		LOG_INF("Current SNR: %d dB", snr);
+	}
+	
+	k_work_schedule(&sig_work, K_SECONDS(10));
 }
 
 int main(void)
