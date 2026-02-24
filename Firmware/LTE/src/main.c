@@ -116,7 +116,7 @@ static void lte_handler(const struct lte_lc_evt *const evt)
 		else {
 			atomic_set(&rrc_connected, 0);
 			LOG_INF("RRC connection status: Idle");
-			
+
 			k_work_cancel_delayable(&sig_work);
 		}
 		break;
@@ -134,6 +134,28 @@ static void lte_handler(const struct lte_lc_evt *const evt)
 	default:
 		break;
 	}
+}
+
+static void sig_work_fn(struct k_work *work)
+{
+	ARG_UNUSED(work);
+
+	if (!atomic_get(&rrc_connected) || !atomic_get(&modem_info_ready)) {
+		LOG_INF("RRC not connected or modem info not ready, skipping signal strength check");
+		return;
+	}
+
+	int rsrp, snr;
+
+	if (modem_info_get_rsrp(&rsrp) == 0) {
+		LOG_INF("Current RSRP: %d dBm", rsrp);
+	}
+
+	if (modem_info_get_snr(&snr) == 0) {
+		LOG_INF("Current SNR: %d dB", snr);
+	}
+	
+	k_work_schedule(&sig_work, K_SECONDS(10));
 }
 
 static int modem_configure(void)
@@ -293,28 +315,6 @@ static void button_handler(uint32_t button_state, uint32_t has_changed)
 		}
 		break;
 	}
-}
-
-static void sig_work_fn(struct k_work *work)
-{
-	ARG_UNUSED(work);
-
-	if (!atomic_get(&rrc_connected) || !atomic_get(&modem_info_ready)) {
-		LOG_INF("RRC not connected or modem info not ready, skipping signal strength check");
-		return;
-	}
-
-	int rsrp, snr;
-
-	if (modem_info_get_rsrp(&rsrp) == 0) {
-		LOG_INF("Current RSRP: %d dBm", rsrp);
-	}
-
-	if (modem_info_get_snr(&snr) == 0) {
-		LOG_INF("Current SNR: %d dB", snr);
-	}
-	
-	k_work_schedule(&sig_work, K_SECONDS(10));
 }
 
 int main(void)
