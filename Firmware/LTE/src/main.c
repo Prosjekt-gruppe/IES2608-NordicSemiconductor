@@ -30,6 +30,7 @@ static uint8_t recv_buf[MESSAGE_SIZE];
 
 static struct k_work_delayable sig_work;
 static atomic_t rrc_connected;
+static atomic_t modem_info_ready;
 
 static K_SEM_DEFINE(lte_connected, 0, 1);
 
@@ -109,12 +110,14 @@ static void lte_handler(const struct lte_lc_evt *const evt)
 		if (evt->rrc_mode == LTE_LC_RRC_MODE_CONNECTED) {
 			atomic_set(&rrc_connected, 1);
 			LOG_INF("RRC connection status: Connected");
+
 			k_work_schedule(&sig_work, K_SECONDS(10));
 			}
 		else {
 			atomic_set(&rrc_connected, 0);
-			k_work_cancel_delayable(&sig_work);
 			LOG_INF("RRC connection status: Idle");
+			
+			k_work_cancel_delayable(&sig_work);
 		}
 		break;
 	case LTE_LC_EVT_PSM_UPDATE:
@@ -136,6 +139,10 @@ static void lte_handler(const struct lte_lc_evt *const evt)
 static int modem_configure(void)
 {
 	int err;
+
+	k_work_init_delayable(&sig_work, sig_work_fn);
+	atomic_clear(&rrc_connected);
+	atomic_clear(&modem_info_ready);
 
 	LOG_INF("Initializing modem library");
 
@@ -169,6 +176,9 @@ static int modem_configure(void)
 	err = modem_info_init();
 	if (err) {
 		LOG_ERR("Failed to initialize modem info library, error: %d", err);
+	}
+	else {
+		atomic_set(&modem_info_ready, 1);
 	}
 
 	return 0;
@@ -289,8 +299,8 @@ static void sig_work_fn(struct k_work *work)
 {
 	ARG_UNUSED(work);
 
-	if (!atomic_get(&rrc_connected)) {
-		LOG_INF("RRC not connected, skipping signal strength check");
+	if (!atomic_get(&rrc_connected) || !atomic_get(&modem_info_ready)) {
+		LOG_INF("RRC not connected or modem info not ready, skipping signal strength check");
 		return;
 	}
 
@@ -321,7 +331,6 @@ int main(void)
 		LOG_ERR("Failed to configure the modem");
 		return 0;
 	}
-	k_work_init_delayable(&sig_work, sig_work_fn);
 
 	if (dk_buttons_init(button_handler) != 0) {
 		LOG_ERR("Failed to initialize the buttons library");
