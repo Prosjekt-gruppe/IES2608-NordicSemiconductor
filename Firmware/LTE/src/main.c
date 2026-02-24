@@ -1,8 +1,9 @@
+//Currently working on "intelligent modem". This will notice when the signal strength of LTE-M is deteriorating and will initiate the swap to NTN
+
 #include <stdio.h>
 #include <ncs_version.h>
 #include <zephyr/kernel.h>
 #include <zephyr/net/socket.h>
-
 #include <zephyr/logging/log.h>
 #include <dk_buttons_and_leds.h>
 #include <modem/nrf_modem_lib.h>
@@ -26,6 +27,10 @@ static uint8_t gps_data[MESSAGE_SIZE];
 static int sock;
 static struct sockaddr_storage server;
 static uint8_t recv_buf[MESSAGE_SIZE];
+
+static struct k_work_delayable sig_work;
+static atomic_t rrc_connected;
+static atomic_t modem_info_ready;
 
 static K_SEM_DEFINE(lte_connected, 0, 1);
 
@@ -102,9 +107,18 @@ static void lte_handler(const struct lte_lc_evt *const evt)
 		k_sem_give(&lte_connected);
 		break;
 	case LTE_LC_EVT_RRC_UPDATE:
-		LOG_INF("RRC mode: %s",
-				evt->rrc_mode == LTE_LC_RRC_MODE_CONNECTED ?
-				"Connected" : "Idle");
+		if (evt->rrc_mode == LTE_LC_RRC_MODE_CONNECTED) {
+			atomic_set(&rrc_connected, 1);
+			LOG_INF("RRC connection status: Connected");
+
+			k_work_schedule(&sig_work, K_SECONDS(10));
+			}
+		else {
+			atomic_set(&rrc_connected, 0);
+			LOG_INF("RRC connection status: Idle");
+
+			k_work_cancel_delayable(&sig_work);
+		}
 		break;
 	case LTE_LC_EVT_PSM_UPDATE:
 		LOG_INF("PSM parameter update: Periodic TAU: %d s, Active time: %d s",
@@ -122,9 +136,35 @@ static void lte_handler(const struct lte_lc_evt *const evt)
 	}
 }
 
+static void sig_work_fn(struct k_work *work)
+{
+	ARG_UNUSED(work);
+
+	if (!atomic_get(&rrc_connected) || !atomic_get(&modem_info_ready)) {
+		LOG_INF("RRC not connected or modem info not ready, skipping signal strength check");
+		return;
+	}
+
+	int rsrp, snr;
+
+	if (modem_info_get_rsrp(&rsrp) == 0) {
+		LOG_INF("Current RSRP: %d dBm", rsrp);
+	}
+
+	if (modem_info_get_snr(&snr) == 0) {
+		LOG_INF("Current SNR: %d dB", snr);
+	}
+	
+	k_work_schedule(&sig_work, K_SECONDS(10));
+}
+
 static int modem_configure(void)
 {
 	int err;
+
+	k_work_init_delayable(&sig_work, sig_work_fn);
+	atomic_clear(&rrc_connected);
+	atomic_clear(&modem_info_ready);
 
 	LOG_INF("Initializing modem library");
 
@@ -154,6 +194,14 @@ static int modem_configure(void)
 	k_sem_take(&lte_connected, K_FOREVER);
 	LOG_INF("Connected to LTE network");
 	dk_set_led_on(DK_LED2);
+
+	err = modem_info_init();
+	if (err) {
+		LOG_ERR("Failed to initialize modem info library, error: %d", err);
+	}
+	else {
+		atomic_set(&modem_info_ready, 1);
+	}
 
 	return 0;
 }
