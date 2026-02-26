@@ -9,3 +9,5 @@ For now here is list over what the applications do:
 **NTN**: Will be used for NTN testing, but has not yet been made.
 
 **LDS**: Local Data Storage for a more efficient way to collect data
+
+Testing
