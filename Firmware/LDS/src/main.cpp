@@ -7,11 +7,11 @@
 static void ModemSleep(){
   esp_sleep_disable_wakeup_source;
   btStop();
-  WiFi.mode(WIFI_OFF)
+  WiFi.mode(WIFI_OFF);
 }
 
 void setup(){
-  // put your setup code here, to run once:
+  ModemSleep();
 
 }
 
