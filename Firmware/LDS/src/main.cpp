@@ -1,19 +1,20 @@
 #include <Arduino.h>
-#include <cdc>
+#include <SD.h>
+#include <Wire.h>
+#include <WiFi.h>
 
-// put function declarations here:
-int myFunction(int, int);
+//Puts Esp32 into Modem sleep for redused power consumption
+static void ModemSleep(){
+  esp_sleep_disable_wakeup_source;
+  btStop();
+  WiFi.mode(WIFI_OFF)
+}
 
-void setup() {
+void setup(){
   // put your setup code here, to run once:
-  int result = myFunction(2, 3);
+
 }
 
 void loop() {
   // put your main code here, to run repeatedly:
-}
-
-// put function definitions here:
-int myFunction(int x, int y) {
-  return x + y;
 }
