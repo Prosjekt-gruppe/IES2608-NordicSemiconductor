@@ -1,4 +1,5 @@
 #include <Arduino.h>
+#include <cdc>
 
 // put function declarations here:
 int myFunction(int, int);
