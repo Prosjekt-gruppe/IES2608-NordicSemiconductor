@@ -10,6 +10,7 @@
 #include <modem/lte_lc.h>
 #include <modem/modem_info.h>
 #include <nrf_modem_gnss.h>
+#include <limits.h>
 
 #define SERVER_HOSTNAME "udp-echo.nordicsemi.academy"
 #define SERVER_PORT "2444"
@@ -31,6 +32,17 @@ static uint8_t recv_buf[MESSAGE_SIZE];
 static struct k_work_delayable sig_work;
 static atomic_t rrc_connected;
 static atomic_t modem_info_ready;
+
+/* Last samples */
+static int last_rsrp_dbm = INT32_MIN;
+static int last_snr_db   = INT32_MIN;
+
+/* Optional: keep a short history (trend) */
+#define SIG_HIST_LEN 6  /* 6 samples = 60 s if you poll every 10 s */
+static int rsrp_hist[SIG_HIST_LEN];
+static int snr_hist[SIG_HIST_LEN];
+static uint8_t hist_idx;
+static bool hist_full;
 
 static K_SEM_DEFINE(lte_connected, 0, 1);
 
@@ -138,24 +150,69 @@ static void lte_handler(const struct lte_lc_evt *const evt)
 
 static void sig_work_fn(struct k_work *work)
 {
-	ARG_UNUSED(work);
+    ARG_UNUSED(work);
 
-	if (!atomic_get(&rrc_connected) || !atomic_get(&modem_info_ready)) {
-		LOG_INF("RRC not connected or modem info not ready, skipping signal strength check");
-		return;
-	}
+    if (!atomic_get(&rrc_connected) || !atomic_get(&modem_info_ready)) {
+        return;
+    }
 
-	int rsrp, snr;
+    int rsrp, snr;
 
-	if (modem_info_get_rsrp(&rsrp) == 0) {
-		LOG_INF("Current RSRP: %d dBm", rsrp);
-	}
+    if (modem_info_get_rsrp(&rsrp) != 0 || modem_info_get_snr(&snr) != 0) {
+        /* Try again later while connected */
+        k_work_schedule(&sig_work, K_SECONDS(10));
+        return;
+    }
 
-	if (modem_info_get_snr(&snr) == 0) {
-		LOG_INF("Current SNR: %d dB", snr);
-	}
-	
-	k_work_schedule(&sig_work, K_SECONDS(10));
+    /* Print current */
+    LOG_INF("RSRP: %d dBm, SNR: %d dB", rsrp, snr);
+
+    /* Compare to previous (simple delta) */
+    if (last_rsrp_dbm != INT32_MIN) {
+        int drsrp = rsrp - last_rsrp_dbm; /* negative means worse */
+        int dsnr  = snr  - last_snr_db;
+
+        if (drsrp <= -5) {
+            LOG_WRN("RSRP dropped %d dB (from %d to %d)", -drsrp, last_rsrp_dbm, rsrp);
+        }
+        if (dsnr <= -3) {
+            LOG_WRN("SNR dropped %d dB (from %d to %d)", -dsnr, last_snr_db, snr);
+        }
+    }
+
+    /* Save “last” */
+    last_rsrp_dbm = rsrp;
+    last_snr_db   = snr;
+
+    /* Save history for trend */
+    rsrp_hist[hist_idx] = rsrp;
+    snr_hist[hist_idx]  = snr;
+    hist_idx = (hist_idx + 1) % SIG_HIST_LEN;
+    if (hist_idx == 0) {
+        hist_full = true;
+    }
+
+    /* Optional: detect steady degradation over last 3 points */
+    if (hist_full) {
+        /* Look at last 3 samples (most recent is at idx-1) */
+        int i2 = (hist_idx + SIG_HIST_LEN - 1) % SIG_HIST_LEN;
+        int i1 = (hist_idx + SIG_HIST_LEN - 2) % SIG_HIST_LEN;
+        int i0 = (hist_idx + SIG_HIST_LEN - 3) % SIG_HIST_LEN;
+
+        bool rsrp_worsening = (rsrp_hist[i2] < rsrp_hist[i1]) && (rsrp_hist[i1] < rsrp_hist[i0]);
+        bool snr_worsening  = (snr_hist[i2]  < snr_hist[i1])  && (snr_hist[i1]  < snr_hist[i0]);
+
+        if (rsrp_worsening) {
+            LOG_WRN("RSRP trend worsening: %d -> %d -> %d dBm",
+                    rsrp_hist[i0], rsrp_hist[i1], rsrp_hist[i2]);
+        }
+        if (snr_worsening) {
+            LOG_WRN("SNR trend worsening: %d -> %d -> %d dB",
+                    snr_hist[i0], snr_hist[i1], snr_hist[i2]);
+        }
+    }
+
+    k_work_schedule(&sig_work, K_SECONDS(10));
 }
 
 static int modem_configure(void)
@@ -182,6 +239,15 @@ static int modem_configure(void)
 	err = lte_lc_edrx_req(false); //Enable again when you want eDRX, does not work with GNSS for now
 	if (err) {
 		LOG_ERR("lte_lc_edrx_req, error: %d", err);
+	}
+
+	err = lte_lc_system_mode_set(
+		LTE_LC_SYSTEM_MODE_LTEM_GPS,
+		LTE_LC_SYSTEM_MODE_PREFER_AUTO
+	); //Set which mode you want for modem
+	
+	if (err) {
+		LOG_ERR("lte_lc_system_mode_set, error: %d", err);
 	}
 	
 	LOG_INF("Connecting to LTE network");
