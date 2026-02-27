@@ -150,24 +150,69 @@ static void lte_handler(const struct lte_lc_evt *const evt)
 
 static void sig_work_fn(struct k_work *work)
 {
-	ARG_UNUSED(work);
+    ARG_UNUSED(work);
 
-	if (!atomic_get(&rrc_connected) || !atomic_get(&modem_info_ready)) {
-		LOG_INF("RRC not connected or modem info not ready, skipping signal strength check");
-		return;
-	}
+    if (!atomic_get(&rrc_connected) || !atomic_get(&modem_info_ready)) {
+        return;
+    }
 
-	int rsrp, snr;
+    int rsrp, snr;
 
-	if (modem_info_get_rsrp(&rsrp) == 0) {
-		LOG_INF("Current RSRP: %d dBm", rsrp);
-	}
+    if (modem_info_get_rsrp(&rsrp) != 0 || modem_info_get_snr(&snr) != 0) {
+        /* Try again later while connected */
+        k_work_schedule(&sig_work, K_SECONDS(10));
+        return;
+    }
 
-	if (modem_info_get_snr(&snr) == 0) {
-		LOG_INF("Current SNR: %d dB", snr);
-	}
-	
-	k_work_schedule(&sig_work, K_SECONDS(10));
+    /* Print current */
+    LOG_INF("RSRP: %d dBm, SNR: %d dB", rsrp, snr);
+
+    /* Compare to previous (simple delta) */
+    if (last_rsrp_dbm != INT32_MIN) {
+        int drsrp = rsrp - last_rsrp_dbm; /* negative means worse */
+        int dsnr  = snr  - last_snr_db;
+
+        if (drsrp <= -5) {
+            LOG_WRN("RSRP dropped %d dB (from %d to %d)", -drsrp, last_rsrp_dbm, rsrp);
+        }
+        if (dsnr <= -3) {
+            LOG_WRN("SNR dropped %d dB (from %d to %d)", -dsnr, last_snr_db, snr);
+        }
+    }
+
+    /* Save “last” */
+    last_rsrp_dbm = rsrp;
+    last_snr_db   = snr;
+
+    /* Save history for trend */
+    rsrp_hist[hist_idx] = rsrp;
+    snr_hist[hist_idx]  = snr;
+    hist_idx = (hist_idx + 1) % SIG_HIST_LEN;
+    if (hist_idx == 0) {
+        hist_full = true;
+    }
+
+    /* Optional: detect steady degradation over last 3 points */
+    if (hist_full) {
+        /* Look at last 3 samples (most recent is at idx-1) */
+        int i2 = (hist_idx + SIG_HIST_LEN - 1) % SIG_HIST_LEN;
+        int i1 = (hist_idx + SIG_HIST_LEN - 2) % SIG_HIST_LEN;
+        int i0 = (hist_idx + SIG_HIST_LEN - 3) % SIG_HIST_LEN;
+
+        bool rsrp_worsening = (rsrp_hist[i2] < rsrp_hist[i1]) && (rsrp_hist[i1] < rsrp_hist[i0]);
+        bool snr_worsening  = (snr_hist[i2]  < snr_hist[i1])  && (snr_hist[i1]  < snr_hist[i0]);
+
+        if (rsrp_worsening) {
+            LOG_WRN("RSRP trend worsening: %d -> %d -> %d dBm",
+                    rsrp_hist[i0], rsrp_hist[i1], rsrp_hist[i2]);
+        }
+        if (snr_worsening) {
+            LOG_WRN("SNR trend worsening: %d -> %d -> %d dB",
+                    snr_hist[i0], snr_hist[i1], snr_hist[i2]);
+        }
+    }
+
+    k_work_schedule(&sig_work, K_SECONDS(10));
 }
 
 static int modem_configure(void)
