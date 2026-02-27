@@ -183,6 +183,15 @@ static int modem_configure(void)
 	if (err) {
 		LOG_ERR("lte_lc_edrx_req, error: %d", err);
 	}
+
+	err = lte_lc_system_mode_set(
+		LTE_LC_SYSTEM_MODE_LTEM_GPS,
+		LTE_LC_SYSTEM_MODE_PREFER_AUTO
+	); //Set which mode you want for modem
+	
+	if (err) {
+		LOG_ERR("lte_lc_system_mode_set, error: %d", err);
+	}
 	
 	LOG_INF("Connecting to LTE network");
 	err = lte_lc_connect_async(lte_handler);
