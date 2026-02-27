@@ -10,6 +10,7 @@
 #include <modem/lte_lc.h>
 #include <modem/modem_info.h>
 #include <nrf_modem_gnss.h>
+#include <limits.h>
 
 #define SERVER_HOSTNAME "udp-echo.nordicsemi.academy"
 #define SERVER_PORT "2444"
@@ -31,6 +32,17 @@ static uint8_t recv_buf[MESSAGE_SIZE];
 static struct k_work_delayable sig_work;
 static atomic_t rrc_connected;
 static atomic_t modem_info_ready;
+
+/* Last samples */
+static int last_rsrp_dbm = INT32_MIN;
+static int last_snr_db   = INT32_MIN;
+
+/* Optional: keep a short history (trend) */
+#define SIG_HIST_LEN 6  /* 6 samples = 60 s if you poll every 10 s */
+static int rsrp_hist[SIG_HIST_LEN];
+static int snr_hist[SIG_HIST_LEN];
+static uint8_t hist_idx;
+static bool hist_full;
 
 static K_SEM_DEFINE(lte_connected, 0, 1);
 
