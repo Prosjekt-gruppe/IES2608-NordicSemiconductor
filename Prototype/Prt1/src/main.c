@@ -11,6 +11,7 @@
 #include <modem/modem_info.h>
 #include <nrf_modem_gnss.h>
 #include <limits.h>
+#include <string.h>
 
 #define SERVER_HOSTNAME "udp-echo.nordicsemi.academy"
 #define SERVER_PORT "2444"
@@ -42,7 +43,7 @@ static int last_snr_db   = INT32_MIN;
 static int rsrp_hist[SIG_HIST_LEN];
 static int snr_hist[SIG_HIST_LEN];
 static uint8_t hist_idx;
-static bool hist_full;
+static uint8_t hist_count;
 
 static K_SEM_DEFINE(lte_connected, 0, 1);
 
@@ -188,12 +189,12 @@ static void sig_work_fn(struct k_work *work)
     rsrp_hist[hist_idx] = rsrp;
     snr_hist[hist_idx]  = snr;
     hist_idx = (hist_idx + 1) % SIG_HIST_LEN;
-    if (hist_idx == 0) {
-        hist_full = true;
+    if (hist_count < SIG_HIST_LEN) {
+        hist_count++;
     }
 
     /* Optional: detect steady degradation over last 3 points */
-    if (hist_full) {
+    if (hist_count >= 3) {
         /* Look at last 3 samples (most recent is at idx-1) */
         int i2 = (hist_idx + SIG_HIST_LEN - 1) % SIG_HIST_LEN;
         int i1 = (hist_idx + SIG_HIST_LEN - 2) % SIG_HIST_LEN;
@@ -295,6 +296,11 @@ static void gnss_event_handler(int event)
 
 	switch (event) {
 	case NRF_MODEM_GNSS_EVT_PVT:
+		err = nrf_modem_gnss_read(&pvt_data, sizeof(pvt_data), NRF_MODEM_GNSS_DATA_PVT);
+		if (err) {
+			LOG_ERR("nrf_modem_gnss_read failed, err %d", err);
+			return;
+		}
 		num_satellites = 0;
 		for (int i = 0; i < 12 ; i++) {
 			if (pvt_data.sv[i].signal != 0) {
@@ -302,16 +308,11 @@ static void gnss_event_handler(int event)
 			}
 		}
 		LOG_INF("Searching. Current satellites: %d", num_satellites);
-		err = nrf_modem_gnss_read(&pvt_data, sizeof(pvt_data), NRF_MODEM_GNSS_DATA_PVT);
-		if (err) {
-			LOG_ERR("nrf_modem_gnss_read failed, err %d", err);
-			return;
-		}
 		if (pvt_data.flags & NRF_MODEM_GNSS_PVT_FLAG_FIX_VALID) {
 			dk_set_led_on(DK_LED1);
 			print_fix_data(&pvt_data);
 			if (!first_fix) {
-				LOG_INF("Time to first fix: %2.1lld s", (k_uptime_get() - gnss_start_time)/1000);
+				LOG_INF("Time to first fix: %lld s", (k_uptime_get() - gnss_start_time)/1000);
 				first_fix = true;
 			}
 			return;
@@ -373,7 +374,7 @@ static void button_handler(uint32_t button_state, uint32_t has_changed)
 	switch (has_changed) {
 	case DK_BTN1_MSK:
 		if (button_state & DK_BTN1_MSK){
-			int err = send(sock, &gps_data, sizeof(gps_data), 0);
+			int err = send(sock, gps_data, strlen((char *)gps_data), 0);
 			if (err < 0) {
 				LOG_INF("Failed to send message, %d", errno);
 				return;
