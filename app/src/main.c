@@ -14,114 +14,177 @@
 LOG_MODULE_REGISTER(app, LOG_LEVEL_INF);
 
 
-static void idle_entry(void *obj);
-static enum smf_state_result idle_run(void *obj);
+static void ltem_connecting_entry(void *ctx);
+static enum smf_state_result ltem_connecting_run(void *ctx);
 
-static void running_entry(void *obj);
-static enum smf_state_result running_run(void *obj);
-
-
-K_SEM_DEFINE(state_change_sem, 0, 1);
+static void ltem_connected_entry(void *ctx);
+static enum smf_state_result ltem_connected_run(void *ctx);
 
 
-enum test_states {
-    STATE_IDLE,
-    STATE_RUNNING
+//K_SEM_DEFINE(state_change_sem, 0, 1);
+
+
+enum rat {
+    RAT_LTEM,
+    RAT_NTN
 };
 
 
-struct test_object {
+enum app_state {
+    STATE_LTEM_CONNECTING,
+    STATE_LTEM_CONNECTED
+};
+
+
+enum app_evt_type {
+    EVT_BOOT,
+    EVT_REG_OK,
+    EVT_REG_FAIL,
+    EVT_TIMEOUT_1S,
+    EVT_RSRP_UPDATE
+};
+
+
+struct app_event {
+    enum app_evt_type type;
+    union {
+        struct { enum rat rat; } reg;
+        struct { int rsrp_dbm; } meas;
+    };
+};
+
+
+struct app_ctx {
     struct smf_ctx ctx;
 
-    /* shared data */
-    int counter;
-    int running_ms;
-    enum test_states current_state;
+    /* rat overview */
+    enum rat active_rat;
+    enum rat next_rat;
+        
+    int rsrp_dbm;
+    int backoff_ms;
     
-    /* sync */
-    struct k_mutex lock;
+    /* events */
+    struct app_event ev;
+
+    //struct k_mutex lock;
 };
 
-struct state_event {
-    enum test_states new_state;
-    int counter;
-    int running_ms;
-};
+/* event queue */
+K_MSGQ_DEFINE(app_evt_q, sizeof(struct app_event), 16, 4);
 
-K_MSGQ_DEFINE(state_evt_q, sizeof(struct state_event), 8, 4);
+//K_MSGQ_DEFINE(state_evt_q, sizeof(struct state_event), 8, 4);
 
 
 static const struct smf_state states[] = {
-    [STATE_IDLE]    = SMF_CREATE_STATE(idle_entry,    idle_run,    NULL, NULL, NULL),
-    [STATE_RUNNING] = SMF_CREATE_STATE(running_entry, running_run, NULL, NULL, NULL),
+    [STATE_LTEM_CONNECTING] = SMF_CREATE_STATE(ltem_connecting_entry, ltem_connecting_run, NULL, NULL, NULL),
+    [STATE_LTEM_CONNECTED] = SMF_CREATE_STATE(ltem_connected_entry, ltem_connected_run, NULL, NULL, NULL),
 };
 
-static void set_state(struct test_object *o, enum test_states s) 
+/*
+static void tick_timer_cb(struct k_timer *t)
 {
-    o->current_state = s;
-    smf_set_state(SMF_CTX(o), &states[s]);
+    ARG_UNUSED(t);
+    struct app_event ev = { .type = EVT_TICK_100MS};
+    (void)k_msgq_put(&app_evt_q, &ev, K_NO_WAIT);
 
-    /* signal monitor thread */
-    //k_sem_give(&state_change_sem);
+}
+*/
 
-    struct state_event ev = {
-        .new_state = s,
-        .counter = o->counter,
-        .running_ms = o-> running_ms,
-    };
+//K_TIMER_DEFINE(tick_timer, tick_timer_cb, NULL);
 
-    /* add state event object to queue */
-    int err = k_msgq_put(&state_evt_q, &ev, K_NO_WAIT);
-    if (err != 0) {
-        LOG_WRN("state_evt_q full, dropping event");
+
+static void timeout_timer_cb(struct k_timer *t)
+{
+    ARG_UNUSED(t);
+    struct app_event ev = { .type = EVT_TIMEOUT_1S };
+    (void)k_msgq_put(&app_evt_q, &ev, K_NO_WAIT);
+
+}
+
+K_TIMER_DEFINE(timeout_timer, timeout_timer_cb, NULL);
+
+
+static void ltem_connecting_entry(void *ctx) {
+    ARG_UNUSED(ctx);
+    LOG_INF("ENTERING: STATE_LTEM_CONNECTING");
+}
+
+
+static enum smf_state_result ltem_connecting_run(void *obj)
+{
+    struct app_ctx *ctx = obj;
+
+    switch (ctx->ev.type) {
+    case EVT_BOOT: {
+        /* dummy input */
+        struct app_event meas = { .type = EVT_RSRP_UPDATE, .meas = { .rsrp_dbm = -95 } };
+        (void)k_msgq_put(&app_evt_q, &meas, K_NO_WAIT);
+        break;
     }
-}
 
+    case EVT_RSRP_UPDATE:
+        ctx->rsrp_dbm = ctx->ev.meas.rsrp_dbm;
+        LOG_INF("LTEM_CONNECTING: rsrp=%d", ctx->rsrp_dbm);
 
-static void idle_entry(void *obj) 
-{
-    ARG_UNUSED(obj);
-    LOG_INF("IDLE STATE");
-}
+        if (ctx->rsrp_dbm > -100) {
+            smf_set_state(SMF_CTX(ctx), &states[STATE_LTEM_CONNECTED]);
+        }
+        break;
 
-
-static enum smf_state_result idle_run(void *obj)
-{
-    struct test_object *state = obj;
-
-    LOG_INF("IDLE: counter=%d", state->counter);
-
-    if (state->counter++ > 3) {
-        state->counter = 0;
-        set_state(obj, STATE_RUNNING);
-    }
-
-    return SMF_EVENT_HANDLED;
-}
-
-
-static void running_entry(void *obj) 
-{
-    ARG_UNUSED(obj);
-    LOG_INF("RUNNING STATE");
-}
-
-
-static enum smf_state_result running_run(void *obj)
-{
-    struct test_object *state = obj;
-
-    LOG_INF("RUNNING: counter=%d", state->counter);
-
-    k_sleep(K_SECONDS(1));
-
-    if (state->counter++ >= 9) {
-        state->counter = 0;
-        set_state(obj, STATE_IDLE);
+    default:
+        break;
     }
 
     return SMF_EVENT_HANDLED;
+}
 
+
+static void ltem_connected_entry(void *obj) 
+{
+    struct app_ctx *ctx = obj;
+    LOG_INF("ENTERING STATE: LTEM_CONNECTED");
+
+    k_timer_start(&timeout_timer, K_SECONDS(1), K_NO_WAIT);
+}
+
+
+static enum smf_state_result ltem_connected_run(void *obj)
+{
+    struct app_ctx *ctx = obj;
+
+    switch (ctx->ev.type) {
+
+    case EVT_TIMEOUT_1S: {
+        smf_set_state(SMF_CTX(ctx), &states[STATE_LTEM_CONNECTING]);
+
+        int dummy_rsrp = -105;
+
+        LOG_INF("LTEM_CONNECTED: Previous RSRP=%d", ctx->rsrp_dbm);
+
+        struct app_event meas_ev = {
+            .type = EVT_RSRP_UPDATE,
+            .meas = { .rsrp_dbm = dummy_rsrp }
+        };
+        (void)k_msgq_put(&app_evt_q, &meas_ev, K_NO_WAIT);
+
+        struct app_event reg_ev = {
+            .type = EVT_REG_OK,
+            .reg = { .rat = RAT_LTEM }
+        };
+        (void)k_msgq_put(&app_evt_q, &reg_ev, K_NO_WAIT);
+
+        return SMF_EVENT_HANDLED;
+    }
+
+    case EVT_RSRP_UPDATE:
+        ctx->rsrp_dbm = ctx->ev.meas.rsrp_dbm;
+        LOG_INF("LTEM_CONNECTED: updated rsrp=%d", ctx->rsrp_dbm);
+        return SMF_EVENT_HANDLED;
+
+    default:
+        return SMF_EVENT_HANDLED;
+    }
 }
 
 /* thread parameters */
@@ -139,43 +202,59 @@ static struct k_thread mon_thread_data;
 static void smf_thread(void *p1, void *p2, void *p3) 
 {
     ARG_UNUSED(p2); ARG_UNUSED(p3);
-    struct test_object *o = p1;
+    struct app_ctx *ctx = p1;
 
-    k_mutex_lock(&o->lock, K_FOREVER);
-    o->current_state = STATE_IDLE;
-    smf_set_initial(SMF_CTX(o), &states[STATE_IDLE]);
-    k_mutex_unlock(&o->lock);
+    smf_set_initial(SMF_CTX(ctx), &states[STATE_LTEM_CONNECTING]);
+
+    //k_mutex_lock(&o->lock, K_FOREVER);
+    //o->current_state = STATE_IDLE;
+    //smf_set_initial(SMF_CTX(o), &states[STATE_IDLE]);
+    //k_mutex_unlock(&o->lock);
+
+    //k_timer_start(&timeout_timer, K_MSEC(100), K_MSEC(100));
 
     while (1) {
-        k_mutex_lock(&o->lock, K_FOREVER);
-        (void)smf_run_state(SMF_CTX(o));
-        k_mutex_unlock(&o->lock);
+        struct app_event ev;
+        //k_mutex_lock(&o->lock, K_FOREVER);
+        //(void)smf_run_state(SMF_CTX(o));
+        //k_mutex_unlock(&o->lock);
 
-        k_sleep((K_MSEC(100)));
+
+
+        //k_sleep((K_MSEC(100)));
+
+
+        k_msgq_get(&app_evt_q, &ev, K_FOREVER);
+        ctx->ev = ev;
+        (void)smf_run_state(SMF_CTX(ctx));
     }
 }
 
 
+/*
 struct mon_snapshot {
     enum test_states state;
     int counter;
     int running_ms;
 };
+*/
 
 
-static const char *state_name(enum test_states s)
+static const char *state_name(enum app_state s)
 {
     switch (s) {
-        case STATE_IDLE: return "IDLE";
-        case STATE_RUNNING: return "RUNNING";
+        case STATE_LTEM_CONNECTING: return "CONNECTING";
+        case STATE_LTEM_CONNECTED: return "CONNECTED";
         default: return "?";
     }
 }
 
+
+/*
 static void monitor_thread(void *p1, void *p2, void *p3)
 {
     ARG_UNUSED(p1); ARG_UNUSED(p2); ARG_UNUSED(p3);
-    //struct test_object *o = p1;
+    //struct app_ctx *o = p1;
 
     while (1) {
         //struct mon_snapshot snap;
@@ -201,22 +280,25 @@ static void monitor_thread(void *p1, void *p2, void *p3)
         //k_sleep(K_MSEC(500));
     }
 }
-
+*/
 
 int main(void)
 {
 
-    static struct test_object obj;
+    static struct app_ctx ctx;
 
-    k_mutex_init(&obj.lock);
+    //k_mutex_init(&ctx.lock);
 
     k_thread_create(&smf_thread_data, smf_stack, SMF_STACK_SIZE,
-        smf_thread, &obj, NULL, NULL, SMF_PRIORITY, 0, K_NO_WAIT);
+        smf_thread, &ctx, NULL, NULL, SMF_PRIORITY, 0, K_NO_WAIT);
 
-    k_thread_create(&mon_thread_data, mon_stack, MON_STACK_SIZE,
-        monitor_thread, &obj, NULL, NULL, MON_PRIORITY, 0, K_NO_WAIT);
+    struct app_event boot = { .type = EVT_BOOT };
+    k_msgq_put(&app_evt_q, &boot, K_NO_WAIT);
 
-    //smf_set_initial(SMF_CTX(&obj), &states[STATE_IDLE]);
+    //k_thread_create(&mon_thread_data, mon_stack, MON_STACK_SIZE,
+    //    monitor_thread, &ctx, NULL, NULL, MON_PRIORITY, 0, K_NO_WAIT);
+
+    //smf_set_initial(SMF_CTX(&ctx), &states[STATE_IDLE]);
 
 
     while (1) {
