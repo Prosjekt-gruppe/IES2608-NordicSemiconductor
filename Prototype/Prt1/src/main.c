@@ -27,7 +27,8 @@
 #include <net/nrf_cloud_coap.h>
 #include <app_version.h>
 
-LOG_MODULE_REGISTER(ArneTracking, LOG_LEVEL_INF);
+LOG_MODULE_REGISTER(ArneTracking, LOG_LEVEL_INF); /*This sets "ArneTracking" in front of all log messages
+and sets the Log level, with LOG_LEVEL_INF being the second most detailed.*/
 
 /* ------------------------------------------------------------------ */
 /* UDP echo server settings                                           */
