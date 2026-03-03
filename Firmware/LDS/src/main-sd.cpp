@@ -1,3 +1,4 @@
+
 #include <Arduino.h>
 #include <Wire.h>
 #include <WiFi.h>
@@ -9,12 +10,14 @@ static void I2C_send();
 
 void setup(){
 	Serial.begin(BAUDRATE);
-	Wire.begin(SCL_PIN,SDA_PIN); //Standard Frequency
+	Wire.begin(SCL_PIN,SDA_PIN,slaveAdr); //Standard Frequency
 	ModemSleep();
+	pinMode(BILED,OUTPUT);
+	Wire.onRequest(I2C_send);
 }
 
 void loop() {
-	Wire.onRequest(I2C_send);
+	
 }
 
 
@@ -24,9 +27,8 @@ static void ModemSleep(){
   	WiFi.mode(WIFI_OFF);
 }
 
-static void I2C_send(byte data){
-    Wire.beginTransmission(slaveAdr);
-    Wire.write((data, sizeof(data)));
-    Wire.endTransmission();
-    Serial.println("Data sendt");
+static void I2C_send() {
+    digitalWrite(BILED, HIGH);
+    Wire.write("Hello Wire"); // Send response
+    digitalWrite(BILED, LOW);
 }
