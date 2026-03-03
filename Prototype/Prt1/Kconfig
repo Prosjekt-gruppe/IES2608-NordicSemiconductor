@@ -15,6 +15,17 @@ config GNSS_PERIODIC_TIMEOUT
 	  Fix timeout (in seconds) for periodic fixes.
 	  If set to zero, GNSS is allowed to run indefinitely until a valid PVT estimate is produced.
 
+config COAP_CELL_DEFAULT_DOREPLY_VAL
+	bool "Default value for the do_reply configuration flag"
+	default y
+
+config COAP_CELL_DEFAULT_FALLBACK_VAL
+	bool "Default value for the fallback configuration flag"
+	default y
+
+config COAP_CELL_DEFAULT_HICONF_VAL
+	bool "Default value for the hi_conf configuration flag"
+
 endmenu
 
 menu "Zephyr Kernel"

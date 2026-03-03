@@ -1,4 +1,13 @@
-//Currently working on "intelligent modem". This will notice when the signal strength of LTE-M is deteriorating and will initiate the swap to NTN
+/*
+ * Merged prototype: "Intelligent Modem" + nRF Cloud CoAP A-GNSS / Cellular Location
+ *
+ * Features:
+ *  - LTE-M with signal-quality monitoring (RSRP / SNR trend detection)
+ *  - Periodic GNSS tracking
+ *  - nRF Cloud CoAP: A-GNSS assistance + cloud-based cellular location
+ *  - UDP socket echo (button-triggered GPS data send)
+ *  - PSM / eDRX power saving
+ */
 
 #include <stdio.h>
 #include <ncs_version.h>
@@ -6,48 +15,75 @@
 #include <zephyr/net/socket.h>
 #include <zephyr/logging/log.h>
 #include <dk_buttons_and_leds.h>
+#include <date_time.h>
 #include <modem/nrf_modem_lib.h>
 #include <modem/lte_lc.h>
 #include <modem/modem_info.h>
+#include <modem/location.h>
 #include <nrf_modem_gnss.h>
+#include <nrf_modem_at.h>
 #include <limits.h>
 #include <string.h>
+#include <net/nrf_cloud_coap.h>
+#include <app_version.h>
 
+LOG_MODULE_REGISTER(ArneTracking, LOG_LEVEL_INF);
+
+/* ------------------------------------------------------------------ */
+/* UDP echo server settings                                           */
+/* ------------------------------------------------------------------ */
 #define SERVER_HOSTNAME "udp-echo.nordicsemi.academy"
 #define SERVER_PORT "2444"
 
 #define MESSAGE_SIZE 256
 #define MESSAGE_TO_SEND "Hello"
 
+/* ------------------------------------------------------------------ */
+/* GNSS state                                                         */
+/* ------------------------------------------------------------------ */
 static struct nrf_modem_gnss_pvt_data_frame pvt_data;
-
 static int64_t gnss_start_time;
 static bool first_fix = false;
-
 static uint8_t gps_data[MESSAGE_SIZE];
 
+/* ------------------------------------------------------------------ */
+/* UDP socket state                                                   */
+/* ------------------------------------------------------------------ */
 static int sock;
 static struct sockaddr_storage server;
 static uint8_t recv_buf[MESSAGE_SIZE];
 
+/* ------------------------------------------------------------------ */
+/* Signal-quality monitoring                                          */
+/* ------------------------------------------------------------------ */
 static struct k_work_delayable sig_work;
 static atomic_t rrc_connected;
 static atomic_t modem_info_ready;
 
-/* Last samples */
 static int last_rsrp_dbm = INT32_MIN;
 static int last_snr_db   = INT32_MIN;
 
-/* Optional: keep a short history (trend) */
 #define SIG_HIST_LEN 6  /* 6 samples = 60 s if you poll every 10 s */
 static int rsrp_hist[SIG_HIST_LEN];
 static int snr_hist[SIG_HIST_LEN];
 static uint8_t hist_idx;
 static uint8_t hist_count;
 
+/* ------------------------------------------------------------------ */
+/* Semaphores                                                         */
+/* ------------------------------------------------------------------ */
 static K_SEM_DEFINE(lte_connected, 0, 1);
+static K_SEM_DEFINE(time_update_finished, 0, 1);
+static K_SEM_DEFINE(location_event, 0, 1);
 
-LOG_MODULE_REGISTER(ArneTracking, LOG_LEVEL_INF);
+/* ------------------------------------------------------------------ */
+/* nRF Cloud cellular-location configuration                          */
+/* ------------------------------------------------------------------ */
+static struct nrf_cloud_location_config cloud_loc_config = {
+	.hi_conf  = IS_ENABLED(CONFIG_COAP_CELL_DEFAULT_HICONF_VAL),
+	.fallback = IS_ENABLED(CONFIG_COAP_CELL_DEFAULT_FALLBACK_VAL),
+	.do_reply = IS_ENABLED(CONFIG_COAP_CELL_DEFAULT_DOREPLY_VAL),
+};
 
 static int server_resolve(void)
 {
@@ -106,6 +142,115 @@ static int server_connect(void)
 	return 0;
 }
 
+/* ------------------------------------------------------------------ */
+/* Date-time handler (needed for JWT auth with nRF Cloud)             */
+/* ------------------------------------------------------------------ */
+static void date_time_evt_handler(const struct date_time_evt *evt)
+{
+	k_sem_give(&time_update_finished);
+}
+
+/* ------------------------------------------------------------------ */
+/* Cloud cellular-location helpers (from AGNSS)                       */
+/* ------------------------------------------------------------------ */
+static void print_cloud_location(double latitude, double longitude, uint32_t accuracy)
+{
+	LOG_INF("Cloud Lat: %f, Lon: %f, Uncertainty: %u m", latitude, longitude, accuracy);
+	LOG_INF("Google maps URL: https://maps.google.com/?q=%.06f,%.06f", latitude, longitude);
+}
+
+static void handle_cloud_location_request(const struct lte_lc_cells_info *cell_info)
+{
+	int err = 0;
+	struct nrf_cloud_location_result cell_pos_result = {0};
+	const struct nrf_cloud_rest_location_request cell_pos_req = {
+		.config    = &cloud_loc_config,
+		.cell_info = (struct lte_lc_cells_info *)cell_info,
+	};
+
+	err = nrf_cloud_coap_location_get(&cell_pos_req, &cell_pos_result);
+	if (err) {
+		LOG_ERR("Cloud location request failed, error: %d", err);
+		if (cell_pos_result.err != NRF_CLOUD_ERROR_NONE) {
+			LOG_ERR("nRF Cloud error code: %d", cell_pos_result.err);
+		}
+		return;
+	}
+
+	LOG_INF("Cellular location fulfilled with %s",
+		cell_pos_result.type == LOCATION_TYPE_SINGLE_CELL  ? "single-cell"
+		: cell_pos_result.type == LOCATION_TYPE_MULTI_CELL ? "multi-cell"
+								   : "unknown");
+
+	if (cloud_loc_config.do_reply) {
+		print_cloud_location(cell_pos_result.lat, cell_pos_result.lon,
+				     cell_pos_result.unc);
+	} else {
+		LOG_INF("Result of location request only stored in nRF Cloud.");
+	}
+}
+
+/* ------------------------------------------------------------------ */
+/* Location library event handler                                     */
+/* ------------------------------------------------------------------ */
+static void location_event_handler(const struct location_event_data *event_data)
+{
+	switch (event_data->id) {
+	case LOCATION_EVT_LOCATION:
+		LOG_INF("Got location from location library");
+		print_cloud_location((double)event_data->location.latitude,
+				     (double)event_data->location.longitude,
+				     (uint32_t)event_data->location.accuracy);
+		break;
+	case LOCATION_EVT_TIMEOUT:
+		LOG_WRN("Getting location timed out");
+		break;
+	case LOCATION_EVT_ERROR:
+		LOG_ERR("Getting location failed");
+		break;
+	case LOCATION_EVT_GNSS_ASSISTANCE_REQUEST:
+		LOG_INF("A-GNSS assistance data requested");
+		break;
+	case LOCATION_EVT_GNSS_PREDICTION_REQUEST:
+		LOG_INF("P-GPS prediction data requested");
+		break;
+	case LOCATION_EVT_CLOUD_LOCATION_EXT_REQUEST:
+		LOG_INF("Cloud location request received from location library");
+		handle_cloud_location_request(event_data->cloud_location_request.cell_data);
+		break;
+	default:
+		LOG_ERR("Unknown location event: %d", event_data->id);
+		break;
+	}
+
+	k_sem_give(&location_event);
+}
+
+static void location_event_wait(void)
+{
+	k_sem_take(&location_event, K_FOREVER);
+}
+
+/**
+ * @brief Request a location fix using default configuration.
+ */
+static void location_default_get(void)
+{
+	int err;
+
+	LOG_INF("Requesting cloud-assisted location...");
+	err = location_request(NULL);
+	if (err) {
+		LOG_ERR("Requesting location failed, error: %d", err);
+		return;
+	}
+
+	location_event_wait();
+}
+
+/* ------------------------------------------------------------------ */
+/* LTE event handler (merged: Prt1 signal monitoring + cloud events)  */
+/* ------------------------------------------------------------------ */
 static void lte_handler(const struct lte_lc_evt *const evt)
 {
 	switch (evt->type) {
@@ -231,13 +376,18 @@ static int modem_configure(void)
 		LOG_ERR("Failed to initialize the modem library, error: %d", err);
 		return err;
 	}
+
+	/* Register date-time handler early so we don't miss the first event */
+	if (IS_ENABLED(CONFIG_DATE_TIME)) {
+		date_time_register_handler(date_time_evt_handler);
+	}
 	
 	err = lte_lc_psm_req(true);
 	if (err) {
 		LOG_ERR("lte_lc_psm_req, error: %d", err);
 	}
 
-	err = lte_lc_edrx_req(false); //Enable again when you want eDRX, does not work with GNSS for now
+	err = lte_lc_edrx_req(false); /* Enable when you want eDRX; does not work with GNSS for now */
 	if (err) {
 		LOG_ERR("lte_lc_edrx_req, error: %d", err);
 	}
@@ -245,8 +395,7 @@ static int modem_configure(void)
 	err = lte_lc_system_mode_set(
 		LTE_LC_SYSTEM_MODE_LTEM_GPS,
 		LTE_LC_SYSTEM_MODE_PREFER_AUTO
-	); //Set which mode you want for modem
-	
+	);
 	if (err) {
 		LOG_ERR("lte_lc_system_mode_set, error: %d", err);
 	}
@@ -265,9 +414,17 @@ static int modem_configure(void)
 	err = modem_info_init();
 	if (err) {
 		LOG_ERR("Failed to initialize modem info library, error: %d", err);
-	}
-	else {
+	} else {
 		atomic_set(&modem_info_ready, 1);
+	}
+
+	/* Wait for valid date/time (required for JWT auth with nRF Cloud) */
+	if (IS_ENABLED(CONFIG_DATE_TIME)) {
+		LOG_INF("Waiting for current time...");
+		k_sem_take(&time_update_finished, K_MINUTES(10));
+		if (!date_time_is_valid()) {
+			LOG_WRN("Failed to get current time. Continuing anyway.");
+		}
 	}
 
 	return 0;
@@ -389,6 +546,8 @@ int main(void)
 	int err;
 	int received;
 
+	LOG_INF("ArneTracking Prototype, version: %s", APP_VERSION_STRING);
+
 	if (dk_leds_init() != 0) {
 		LOG_ERR("Failed to initialize the LED library");
 	}
@@ -403,6 +562,30 @@ int main(void)
 		LOG_ERR("Failed to initialize the buttons library");
 	}
 
+	/* ---- nRF Cloud CoAP setup ---- */
+	err = nrf_cloud_coap_init();
+	if (err) {
+		LOG_ERR("Failed to initialize nRF Cloud CoAP client: %d", err);
+		return 0;
+	}
+	err = nrf_cloud_coap_connect(NULL);
+	if (err) {
+		LOG_ERR("Failed to connect to nRF Cloud: %d", err);
+		return 0;
+	}
+	LOG_INF("Connected to nRF Cloud via CoAP");
+
+	/* ---- Location library setup ---- */
+	err = location_init(location_event_handler);
+	if (err) {
+		LOG_ERR("Failed to initialize the Location library, error: %d", err);
+		return 0;
+	}
+
+	/* Get an initial cloud-assisted cellular location fix */
+	location_default_get();
+
+	/* ---- UDP echo server ---- */
 	if (server_resolve() != 0) {
 		LOG_INF("Failed to resolve server name");
 		return 0;
@@ -413,11 +596,13 @@ int main(void)
 		return 0;
 	}
 
+	/* ---- GNSS periodic tracking ---- */
 	if (gnss_init_and_start() != 0) {
 		LOG_ERR("Failed to initialize and start GNSS");
 		return 0;
 	}
 
+	/* ---- Main loop: receive UDP echo data ---- */
 	while (1) {
 		received = recv(sock, recv_buf, sizeof(recv_buf) - 1, 0);
 
@@ -430,7 +615,6 @@ int main(void)
 
 		recv_buf[received] = 0;
 		LOG_INF("Data received from the server: (%s)", recv_buf);
-
 	}
 
 	(void)close(sock);
