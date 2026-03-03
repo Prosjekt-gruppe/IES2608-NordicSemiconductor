@@ -1,9 +1,3 @@
-/*--------------------------------------------------------------------
-this file is for the Esp32 camera 
-which is an ESP32-S with an SD card module which we will be using
-for testing
---------------------------------------------------------------------*/
-/*
 /*
 Master code is based on an ESP32-S3 chip*/
 
@@ -14,29 +8,44 @@ Master code is based on an ESP32-S3 chip*/
 
 //Puts Esp32 into Modem sleep for redused power consumption
 static void ModemSleep();
-static void I2C_send();
+String I2C_read(int numBytes);
 
 void setup(){
 	Serial.begin(BAUDRATE);
-	Wire.begin(SCL_PIN,SDA_PIN,slaveAdr); //Standard Frequency
+	Wire.begin(11,12); //Standard Frequency
 	ModemSleep();
 	pinMode(BILED,OUTPUT);
-	Wire.onRequest(I2C_send);
 }
 
 void loop() {
-	
+	Wire.requestFrom(slaveAdr, strlen("Hello Wire"));
+	String msg = I2C_read(strlen("Hello Wire"));
+
+    // Only print if a message was received
+    if (msg.length() > 0) {
+        Serial.println(msg);
+
+        // Optional: blink LED as feedback
+        digitalWrite(BILED, HIGH);
+        delay(50);
+        digitalWrite(BILED, LOW);
+    }
+	delay(500);
 }
 
+//=======================================================================
 
-static void ModemSleep(){
-    esp_sleep_disable_wakeup_source;
-  	btStop();
-  	WiFi.mode(WIFI_OFF);
-}
 
-static void I2C_send() {
-    digitalWrite(BILED, HIGH);
-    Wire.write("Hello Wire"); // Send response
-    digitalWrite(BILED, LOW);
+// Separate function for reading I2C data
+String I2C_read(int numBytes) {
+    String msg = "";
+    int count = 0;
+
+    while (Wire.available() && count < numBytes) {
+        char c = Wire.read();
+        msg += c;
+        count++;
+    }
+
+    return msg;
 }
