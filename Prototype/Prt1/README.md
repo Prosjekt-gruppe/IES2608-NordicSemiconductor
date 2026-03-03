@@ -1,0 +1,1 @@
+This is hopefully the first working prototype, with basic functions for LTE-M, battery management and data storage.
