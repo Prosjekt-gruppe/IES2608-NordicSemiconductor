@@ -54,6 +54,12 @@ struct app_event {
 };
 
 
+struct monitor_event {
+    enum app_state state;
+    struct app_event ev;
+    int rsrp_dbm;
+};
+
 struct app_ctx {
     struct smf_ctx ctx;
 
@@ -73,7 +79,7 @@ struct app_ctx {
 /* event queue */
 K_MSGQ_DEFINE(app_evt_q, sizeof(struct app_event), 16, 4);
 
-//K_MSGQ_DEFINE(state_evt_q, sizeof(struct state_event), 8, 4);
+K_MSGQ_DEFINE(monitor_q, sizeof(struct monitor_event), 16, 4);
 
 
 static const struct smf_state states[] = {
@@ -142,7 +148,8 @@ static enum smf_state_result ltem_connecting_run(void *obj)
 
 static void ltem_connected_entry(void *obj) 
 {
-    struct app_ctx *ctx = obj;
+    ARG_UNUSED(obj);
+    //struct app_ctx *ctx = obj;
     LOG_INF("ENTERING STATE: LTEM_CONNECTED");
 
     k_timer_start(&timeout_timer, K_SECONDS(1), K_NO_WAIT);
@@ -168,11 +175,17 @@ static enum smf_state_result ltem_connected_run(void *obj)
         };
         (void)k_msgq_put(&app_evt_q, &meas_ev, K_NO_WAIT);
 
-        struct app_event reg_ev = {
-            .type = EVT_REG_OK,
-            .reg = { .rat = RAT_LTEM }
+        ctx->next_rat = RAT_LTEM;
+
+        struct monitor_event mon = {
+            .state = STATE_LTEM_CONNECTED,
+            .ev = {
+                .type = EVT_REG_OK
+            },
+            .rsrp_dbm = ctx->rsrp_dbm,
         };
-        (void)k_msgq_put(&app_evt_q, &reg_ev, K_NO_WAIT);
+
+        (void)k_msgq_put(&monitor_q, &mon, K_NO_WAIT);
 
         return SMF_EVENT_HANDLED;
     }
@@ -183,6 +196,7 @@ static enum smf_state_result ltem_connected_run(void *obj)
         return SMF_EVENT_HANDLED;
 
     default:
+        LOG_INF("NO EVENT DETECTED");
         return SMF_EVENT_HANDLED;
     }
 }
@@ -223,7 +237,7 @@ static void smf_thread(void *p1, void *p2, void *p3)
 
         //k_sleep((K_MSEC(100)));
 
-
+        /* block thread until next message */
         k_msgq_get(&app_evt_q, &ev, K_FOREVER);
         ctx->ev = ev;
         (void)smf_run_state(SMF_CTX(ctx));
@@ -249,17 +263,28 @@ static const char *state_name(enum app_state s)
     }
 }
 
+static const char *event_name(enum app_evt_type e)
+{
+    switch (e) {
+    case EVT_BOOT: return "BOOT";
+    case EVT_REG_OK: return "REG_OK";
+    case EVT_REG_FAIL: return "REG_FAIL";
+    case EVT_TIMEOUT_1S: return "TIMEOUT_1S";
+    case EVT_RSRP_UPDATE: return "RSRP_UPDATE";
+    default: return "?";
+    }
+}
 
-/*
 static void monitor_thread(void *p1, void *p2, void *p3)
 {
     ARG_UNUSED(p1); ARG_UNUSED(p2); ARG_UNUSED(p3);
     //struct app_ctx *o = p1;
-
+    
+    struct monitor_event ev;
+    
     while (1) {
         //struct mon_snapshot snap;
 
-        struct state_event ev;
 
         //k_sem_take(&state_change_sem, K_FOREVER);
 
@@ -271,16 +296,15 @@ static void monitor_thread(void *p1, void *p2, void *p3)
         //snap.running_ms = o-> running_ms;
         //k_mutex_unlock(&o->lock);
 
-        k_msgq_get(&state_evt_q, &ev, K_FOREVER);
+        k_msgq_get(&monitor_q, &ev, K_FOREVER);
 
 
-        LOG_INF("MON: STATE_CHANGE=%s, counter=%d, running_ms=%d",
-            state_name(ev.new_state), ev.counter, ev.running_ms);
+        LOG_INF("MON: STATE_BEFORE=%s, CURRENT_RSRP=%d, EVENT_NAME=%s",
+            state_name(ev.state), ev.rsrp_dbm, event_name(ev.ev.type));
 
         //k_sleep(K_MSEC(500));
     }
 }
-*/
 
 int main(void)
 {
@@ -295,8 +319,8 @@ int main(void)
     struct app_event boot = { .type = EVT_BOOT };
     k_msgq_put(&app_evt_q, &boot, K_NO_WAIT);
 
-    //k_thread_create(&mon_thread_data, mon_stack, MON_STACK_SIZE,
-    //    monitor_thread, &ctx, NULL, NULL, MON_PRIORITY, 0, K_NO_WAIT);
+    k_thread_create(&mon_thread_data, mon_stack, MON_STACK_SIZE,
+        monitor_thread, NULL, NULL, NULL, MON_PRIORITY, 0, K_NO_WAIT);
 
     //smf_set_initial(SMF_CTX(&ctx), &states[STATE_IDLE]);
 
