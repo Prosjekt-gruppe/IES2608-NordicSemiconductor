@@ -8,8 +8,8 @@ This file is for sdcard read/write development and testing
 
 // MicroSD Libraries
 #include "FS.h"
-#include "SD_MMC.h"
-#include "sd.h"
+#include <SD.h>
+#include <SPI.h>
 // EEPROM Library
 #include "EEPROM.h"
  
@@ -20,69 +20,43 @@ This file is for sdcard read/write development and testing
 
 void initMicroSDCard();
 void testfile();
+File initLogFile(const char* filename);
+
+File datafile;
 
 void setup(){
-	Serial.begin(BAUDRATE);
-	pinMode(4,OUTPUT);
-	pinMode(0,INPUT);
+    Serial.begin(BAUDRATE);
+	SD.begin(4);
+    //pinMode(4,OUTPUT);
+	//pinMode(0,INPUT);
 	ModemSleep();
-	
-	testfile();
+	//testfile();
+    datafile = initLogFile("/ESP32_nano.csv");
+    Serial.println("File initialized");
+    
 }
 	
 void loop() {
+    datafile.print(12000);
+    datafile.println(",Data here");
+    Serial.println("Data written to sd card");
 	delay(10000);
 }
 
 
-void saveCSVHeader() {
-    // Write column headers to CSV
-    const char* header = "Time,position,current use\n"; // Example columns
-    writeFile(SD_MMC, "/data.csv", header);
-}
-void appendCSVData(float temperature, float humidity) {
-    char buffer[64];
-    
-    // Format the data as CSV: "time,temperature,humidity"
-    // Using millis() for time example
-    sprintf(buffer, "%lu,%.2f,%.2f\n", millis()/1000, temperature, humidity);
-    
-    appendFile(SD_MMC, "/data.csv", buffer);
-}
+//Initilases file and writes CSV header if none are present
+File initLogFile(const char* filename) {
+    File file = SD.open(filename, FILE_WRITE);
 
-void testfile(){
-	if(!SD_MMC.begin()){
-        Serial.println("Card Mount Failed");
-        return;
-    }
-    uint8_t cardType = SD_MMC.cardType();
-
-    if(cardType == CARD_NONE){
-        Serial.println("No SD_MMC card attached");
-        return;
+    if (!file) {
+        Serial.println("Failed to open log file");
+        return file;
     }
 
-    Serial.print("SD_MMC Card Type: ");
-    if(cardType == CARD_MMC){
-        Serial.println("MMC");
-    } else if(cardType == CARD_SD){
-        Serial.println("SDSC");
-    } else if(cardType == CARD_SDHC){
-        Serial.println("SDHC");
-    } else {
-        Serial.println("UNKNOWN");
+    if (file.size() == 0) {
+        file.println("time_ms,data");
+        file.flush();
     }
 
-    uint64_t cardSize = SD_MMC.cardSize() / (1024 * 1024);
-    Serial.printf("SD_MMC Card Size: %lluMB\n", cardSize);
-
-    writeFile(SD_MMC, "/hello.csv", "Hello ");
-    appendFile(SD_MMC, "/hello.csv", "SD card!\n");
-    readFile(SD_MMC, "/hello.csv");
-    saveCSVHeader();
-	appendCSVData(10000, 696969);
-	appendCSVData(10001, 416969);
-	for (int i = 0; i < 5000; i++){
-		appendCSVData(random(10546842), random(1000));
-	}
+    return file;
 }
