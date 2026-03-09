@@ -1,0 +1,33 @@
+---
+config:
+  look: classic
+  theme: neutral
+  layout: dagre
+title: NTN-Fallback
+---
+stateDiagram
+  NTN_CONNECTING --> NTN_CONNECTED: EVT_REG_OK<br>active_rat=NTN
+  direction TB
+  [*] --> LTE_CONNECTING:EVT_BOOT
+  state LTE_CONNECTED { 
+    direction LR
+    [*] --> LTE_IDLE
+    LTE_IDLE --> LTE_EVAL
+    LTE_EVAL --> LTE_IDLE
+  }
+  state NTN_CONNECTED {
+    direction LR
+    [*] --> IDLE
+    IDLE --> LTEM_EVAL
+    LTEM_EVAL --> IDLE
+  }
+  LTE_CONNECTING --> LTE_CONNECTED: EVT_REG_OK<br>active_rat=LTEM
+  LTE_CONNECTED --> BACKOFF: EVT_LTEM_POOR<br>next_rat=NTN
+  GNSS_FIX --> NTN_CONNECTING: EVT_GNSS_OK
+  GNSS_FIX --> BACKOFF: EVT_GNSS_TIMEOUT
+  LTE_CONNECTING --> BACKOFF: EVT_REG_FAIL<br>next_rat=NTN
+  BACKOFF --> LTE_CONNECTING: EVT_BACKOFF_EXPIRED<br>next_rat=LTEM
+  BACKOFF --> NTN_CONNECTING: EVT_BACKOFF_EXPIRED
+  NTN_CONNECTING --> BACKOFF: EVT_REG_FAIL<br>active_rat=NTN
+  NTN_CONNECTING --> GNSS_FIX: EVT_NEED_POSITION
+  NTN_CONNECTED --> BACKOFF: EVT_REG_FAIL<br>active_rat=NTN
