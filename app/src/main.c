@@ -32,6 +32,7 @@ static enum smf_state_result boot_run(void *obj);
 
 static void gnss_acquire_entry(void *obj);
 static enum smf_state_result gnss_acquire_run(void *obj);
+static void gnss_acquire_exit(void *obj);
 
 
 //static enum smf_state_result idle_run(void *obj);
@@ -64,7 +65,7 @@ enum app_evt_type {
     EVT_GNSS_FIX,
     EVT_GNSS_TIMEOUT,
     EVT_TIMEOUT,
-    EVT_RSRP_UPDATE
+    EVT_RSRP_UPDATE,
 };
 
 
@@ -83,6 +84,7 @@ struct monitor_event {
     struct app_event ev;
     int rsrp_dbm;
 };
+
 
 struct app_ctx {
     struct smf_ctx ctx;
@@ -106,22 +108,52 @@ struct app_ctx {
     //struct k_mutex lock;
 };
 
+
 /* define state machine framework */
 static const struct smf_state states[] = {
     //[STATE_LTEM_CONNECTING] = SMF_CREATE_STATE(ltem_connecting_entry, ltem_connecting_run, NULL, NULL, NULL),
     //[STATE_LTEM_CONNECTED] = SMF_CREATE_STATE(ltem_connected_entry, ltem_connected_run, NULL, NULL, NULL),
-    [STATE_BOOT]         = SMF_CREATE_STATE(boot_entry, boot_run, NULL, NULL, NULL),
-    [STATE_GNSS_ACQUIRE] = SMF_CREATE_STATE(gnss_acquire_entry, gnss_acquire_run, NULL, NULL, NULL),
-    [STATE_IDLE]         = SMF_CREATE_STATE(NULL, NULL, NULL, NULL, NULL),
+    [STATE_BOOT] = SMF_CREATE_STATE(
+        boot_entry, 
+        boot_run, 
+        NULL, 
+        NULL, 
+        NULL
+    ),
+    [STATE_GNSS_ACQUIRE] = SMF_CREATE_STATE(
+        gnss_acquire_entry, 
+        gnss_acquire_run,
+        gnss_acquire_exit, 
+        NULL, 
+        NULL
+    ),
+    [STATE_IDLE] = SMF_CREATE_STATE(
+        NULL, 
+        NULL, 
+        NULL, 
+        NULL, 
+        NULL
+    ),
 };
 
-/* event queue */
+/* register event queue */
 K_MSGQ_DEFINE(app_evt_q, sizeof(struct app_event), 16, 4);
 
 //K_MSGQ_DEFINE(monitor_q, sizeof(struct monitor_event), 16, 4);
 
 static struct k_work gnss_pvt_work;
 
+static void timeout_timer_cb(struct k_timer *t)
+{
+    ARG_UNUSED(t);
+    struct app_event ev = { .type = EVT_GNSS_TIMEOUT };
+    (void)k_msgq_put(&app_evt_q, &ev, K_NO_WAIT);
+
+}
+
+K_TIMER_DEFINE(timeout_timer, timeout_timer_cb, NULL);
+
+/* define kernel work task */
 static void gnss_pvt_work_handler(struct k_work *work)
 {
     ARG_UNUSED(work);
@@ -132,22 +164,23 @@ static void gnss_pvt_work_handler(struct k_work *work)
 
     if (err) {
         return;
-    }    
+    }
 
     if (pvt.flags & NRF_MODEM_GNSS_PVT_FLAG_FIX_VALID) {
         struct app_event ev = { .type = EVT_GNSS_FIX, .pvt = pvt };
         (void)k_msgq_put(&app_evt_q, &ev, K_NO_WAIT);
-    }    
+    }
 
 }    
 
+/* listen to gnss events from modem */
 static void gnss_event_handler(int event)
 {
     if (event == NRF_MODEM_GNSS_EVT_PVT) {
         k_work_submit(&gnss_pvt_work);
-    }        
-    
-}    
+    }
+}
+
 
 static void boot_entry(void *obj)
 {
@@ -159,8 +192,15 @@ static void boot_entry(void *obj)
         return;
     }
 
+
+    k_work_init(&gnss_pvt_work, gnss_pvt_work_handler);
+    
+    /* register modem callback */
+    nrf_modem_gnss_event_handler_set(gnss_event_handler);
+
     LOG_INF("BOOT: modem lib init ok");
 }
+
 
 static enum smf_state_result boot_run(void *obj)
 {
@@ -177,15 +217,22 @@ static enum smf_state_result boot_run(void *obj)
 
 static void gnss_acquire_entry(void *obj)
 {
-    ARG_UNUSED(obj);
+    struct app_ctx *ctx = obj;
 
-    k_work_init(&gnss_pvt_work, gnss_pvt_work_handler);
-    nrf_modem_gnss_event_handler_set(gnss_event_handler);
+    ctx->have_fix = false;
 
+    k_timer_start(&timeout_timer, K_SECONDS(180), K_NO_WAIT);
+
+    /* set gnss criteria */
     (void)nrf_modem_gnss_fix_interval_set(0);
     (void)nrf_modem_gnss_fix_retry_set(180);
-    (void)nrf_modem_gnss_start();
+    (void)nrf_modem_gnss_start(); // start
+
+
+    LOG_INF("GNSS_ACQUIRE: gnss started");
 }
+
+
 
 static enum smf_state_result gnss_acquire_run(void *obj) 
 {
@@ -209,17 +256,25 @@ static enum smf_state_result gnss_acquire_run(void *obj)
 
 
     case EVT_GNSS_TIMEOUT:
-        LOG_INF("RETRY GNSS FIX");
+        LOG_INF("GNSS_ACQUIRE: gnss timeout");
         (void)nrf_modem_gnss_stop();
         smf_set_state(SMF_CTX(ctx), &states[STATE_IDLE]);
         return SMF_EVENT_HANDLED;
         
     default:
         return SMF_EVENT_HANDLED;
-    }        
+    }
 
 }
 
+
+static void gnss_acquire_exit(void *obj)
+{
+    ARG_UNUSED(obj);
+
+    k_timer_stop(&timeout_timer);
+    (void)nrf_modem_gnss_stop();
+}
 
 
 /*
@@ -235,15 +290,7 @@ static void tick_timer_cb(struct k_timer *t)
 //K_TIMER_DEFINE(tick_timer, tick_timer_cb, NULL);
 
 
-static void timeout_timer_cb(struct k_timer *t)
-{
-    ARG_UNUSED(t);
-    struct app_event ev = { .type = EVT_TIMEOUT };
-    (void)k_msgq_put(&app_evt_q, &ev, K_NO_WAIT);
 
-}
-
-K_TIMER_DEFINE(timeout_timer, timeout_timer_cb, NULL);
 
 /*
 static void ltem_connecting_entry(void *ctx) {
