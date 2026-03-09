@@ -1,9 +1,11 @@
 #include <string.h>
+#include <stdio.h>
 #include <zephyr/kernel.h>
 #include <nrf_modem_at.h>
 #include <modem/lte_lc.h>
 #include <modem/location.h>
 #include <modem/nrf_modem_lib.h>
+#include <modem/modem_battery.h>
 #include <date_time.h>
 #include <zephyr/logging/log.h>
 #include <net/nrf_cloud_coap.h>
@@ -159,6 +161,17 @@ static void location_default_get(void)
 
 	location_event_wait();
 }
+
+
+static int battery_telemetry(void)
+{ 
+	int err; 
+	int battery_voltage; 
+	char msg[128]; 
+
+	err = modem_
+}
+
 
 int main(void)
 {
