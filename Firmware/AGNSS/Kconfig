@@ -1,9 +1,3 @@
-#
-# Copyright (c) 2025 Nordic Semiconductor ASA
-#
-# SPDX-License-Identifier: LicenseRef-Nordic-5-Clause
-#
-
 menu "nRF Cloud CoAP Cellular Location Sample"
 
 config COAP_CELL_DEFAULT_DOREPLY_VAL
@@ -16,6 +10,15 @@ config COAP_CELL_DEFAULT_FALLBACK_VAL
 
 config COAP_CELL_DEFAULT_HICONF_VAL
 	bool "Default value for the hi_conf configuration flag"
+	default y
+
+config REPORT_INTERVAL_SECONDS
+	int "Report interval in seconds"
+	default 60
+	range 1 86400
+	help
+	  Interval in seconds between each location and battery report
+	  sent to nRF Cloud.
 
 module = NRF_CLOUD_COAP_CELL_LOCATION_SAMPLE
 module-str = nRF Cloud CoAP Cellular Location Sample

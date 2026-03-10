@@ -427,7 +427,6 @@ static enum smf_state_result wait_location_run(void *obj)
 
 	switch (ctx->evt) {
 	case EVT_LOCATION_READY:
-	case EVT_CLOUD_LOC_READY:
 		ctx->evt = EVT_NONE;
 		smf_set_state(SMF_CTX(ctx), &app_states[STATE_BATTERY_SAMPLE]);
 		break;
@@ -460,7 +459,12 @@ static void done_entry(void *obj)
 	struct app_ctx *ctx = obj;
 
 	print_location(ctx->lat, ctx->lon, ctx->unc);
-	smf_set_terminate(SMF_CTX(ctx), 0);
+
+	LOG_INF("Waiting %d seconds before next report", CONFIG_REPORT_INTERVAL_SECONDS);
+
+	k_sleep(K_SECONDS(CONFIG_REPORT_INTERVAL_SECONDS));
+
+	smf_set_state(SMF_CTX(ctx), &app_states[STATE_LOCATION_REQUEST]);
 }
 
 static void error_entry(void *obj)
@@ -588,6 +592,8 @@ static void handle_cloud_location_request(const struct lte_lc_cells_info *cell_i
 {
 	int err = 0;
 	struct nrf_cloud_location_result cell_pos_result = {0};
+	struct location_data loc = {0};
+
 	const struct nrf_cloud_rest_location_request cell_pos_req = {
 		.config = &app.config,
 		.cell_info = (struct lte_lc_cells_info *)cell_info,
@@ -609,15 +615,29 @@ static void handle_cloud_location_request(const struct lte_lc_cells_info *cell_i
 		cell_pos_result.type == LOCATION_TYPE_MULTI_CELL ? "multi-cell" :
 		"unknown");
 
-	if (app.config.do_reply) {
-		app.lat = cell_pos_result.lat;
-		app.lon = cell_pos_result.lon;
-		app.unc = cell_pos_result.unc;
-	} else {
-		LOG_INF("Result of location request only stored in nRF Cloud.");
-	}
 
-	app.evt = EVT_CLOUD_LOC_READY;
+	// Local copy for logs 
+	app.lat = cell_pos_result.lat;
+	app.lon = cell_pos_result.lon;
+	app.unc = cell_pos_result.unc;
+	
+
+	// Pass the external result back to the location library
+	loc.latitude = cell_pos_result.lat; 
+	loc.longitude = cell_pos_result.lon;
+	loc.accuracy = cell_pos_result.unc; 
+
+	location_cloud_location_ext_result_set(LOCATION_EXT_RESULT_SUCCESS,&loc);
+	
+	/*
+	if (err){
+		LOG_ERR("Failed to provide external location result to library: %d", err);
+		app.err = err;
+		app.evt = EVT_CLOUD_LOC_ERROR;
+		return;
+	}
+	*/
+
 }
 
 int main(void)
