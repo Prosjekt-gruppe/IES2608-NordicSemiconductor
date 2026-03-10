@@ -48,14 +48,17 @@ static void set_state(enum app_state next_state)
 		return;
 	}
 
-	LOG_INF("FSM transition: %s -> %s", app_state_name(current_state),
+	LOG_INF("FSM transition: %s -> %s", 
+		app_state_name(current_state),
 		app_state_name(next_state));
 	current_state = next_state;
 }
 
 static void enter_error_state(const char *reason, int err)
 {
-	LOG_ERR("%s, err: %d", reason, err);
+	LOG_ERR("%s, err: %d", 
+		reason, 
+		err);
 	set_state(APP_STATE_ERROR);
 }
 
@@ -84,7 +87,8 @@ static void handle_ltem_status(const struct app_ltem_status *status)
 		break;
 
 	default:
-		LOG_INF("LTE-M status update: %d", status->state);
+		LOG_INF("LTE-M status update: %d", 
+			status->state);
 		break;
 	}
 }
@@ -98,7 +102,9 @@ static void handle_gnss_status(const struct app_gnss_status *status)
 		}
 
 		LOG_INF("GNSS fix ready: lat=%.06f lon=%.06f satellites=%u",
-			status->latitude, status->longitude, status->tracked_satellites);
+			status->latitude, 
+			status->longitude, 
+			status->tracked_satellites);
 
 		if (status->time_to_first_fix_ms >= 0) {
 			LOG_INF("First fix acquired in %lld ms",
@@ -111,7 +117,8 @@ static void handle_gnss_status(const struct app_gnss_status *status)
 		break;
 
 	default:
-		LOG_INF("GNSS status update: %d", status->state);
+		LOG_INF("GNSS status update: %d", 
+			status->state);
 		break;
 	}
 }
@@ -154,7 +161,8 @@ int main(void)
 
 		err = zbus_sub_wait(&app_fsm_sub, &chan, K_FOREVER);
 		if (err) {
-			LOG_WRN("zbus_sub_wait failed, err: %d", err);
+			LOG_WRN("zbus_sub_wait failed, err: %d", 
+				err);
 			continue;
 		}
 
@@ -163,7 +171,8 @@ int main(void)
 
 			err = zbus_chan_read(chan, &status, K_MSEC(50));
 			if (err) {
-				LOG_WRN("Failed to read LTE-M status, err: %d", err);
+				LOG_WRN("Failed to read LTE-M status, err: %d", 
+					err);
 				continue;
 			}
 
@@ -176,7 +185,8 @@ int main(void)
 
 			err = zbus_chan_read(chan, &status, K_MSEC(50));
 			if (err) {
-				LOG_WRN("Failed to read GNSS status, err: %d", err);
+				LOG_WRN("Failed to read GNSS status, err: %d", 
+					err);
 				continue;
 			}
 
