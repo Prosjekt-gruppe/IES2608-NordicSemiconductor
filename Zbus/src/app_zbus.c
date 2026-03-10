@@ -29,7 +29,9 @@ static int publish_status(const struct zbus_channel *chan, const void *msg)
 	int err = zbus_chan_pub(chan, msg, K_NO_WAIT);
 
 	if (err) {
-		LOG_WRN("Failed to publish %s, err: %d", zbus_chan_name(chan), err);
+		LOG_WRN("Failed to publish %s, err: %d", 
+			zbus_chan_name(chan), 
+			err);
 	}
 
 	return err;
