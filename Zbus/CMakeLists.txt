@@ -4,5 +4,12 @@ find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
 project(cellular_fundamentals)
 
 # NORDIC SDK APP START
-target_sources(app PRIVATE src/main.c)
+target_include_directories(app PRIVATE include)
+
+target_sources(app PRIVATE
+	src/app_zbus.c
+	src/gnss.c
+	src/ltem.c
+	src/main.c
+)
 # NORDIC SDK APP END
