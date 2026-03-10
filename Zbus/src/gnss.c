@@ -37,9 +37,12 @@ static uint8_t count_tracked_satellites(const struct nrf_modem_gnss_pvt_data_fra
 
 static void print_fix_data(const struct nrf_modem_gnss_pvt_data_frame *pvt)
 {
-	LOG_INF("Latitude: %.06f", pvt->latitude);
-	LOG_INF("Longitude: %.06f", pvt->longitude);
-	LOG_INF("Altitude: %.01f m", (double)pvt->altitude);
+	LOG_INF("Latitude: %.06f", 
+		pvt->latitude);
+	LOG_INF("Longitude: %.06f", 
+		pvt->longitude);
+	LOG_INF("Altitude: %.01f m", 
+		(double)pvt->altitude);
 }
 
 static void gnss_event_handler(int event)
@@ -53,13 +56,15 @@ static void gnss_event_handler(int event)
 
 		err = nrf_modem_gnss_read(&pvt_data, sizeof(pvt_data), NRF_MODEM_GNSS_DATA_PVT);
 		if (err) {
-			LOG_ERR("nrf_modem_gnss_read failed, err: %d", err);
+			LOG_ERR("nrf_modem_gnss_read failed, err: %d", 
+				err);
 			(void)publish_error(err);
 			return;
 		}
 
 		satellites = count_tracked_satellites(&pvt_data);
-		LOG_INF("GNSS search active, satellites tracked: %u", satellites);
+		LOG_INF("GNSS search active, satellites tracked: %u", 
+			satellites);
 
 		if ((pvt_data.flags & NRF_MODEM_GNSS_PVT_FLAG_FIX_VALID) == 0U) {
 			return;
@@ -68,7 +73,8 @@ static void gnss_event_handler(int event)
 		if (!first_fix) {
 			ttff_ms = k_uptime_get() - gnss_start_time;
 			first_fix = true;
-			LOG_INF("Time to first fix: %lld s", (long long)(ttff_ms / 1000));
+			LOG_INF("Time to first fix: %lld s", 
+				(long long)(ttff_ms / 1000));
 		}
 
 		print_fix_data(&pvt_data);
@@ -101,19 +107,22 @@ int gnss_init(void)
 
 	err = nrf_modem_gnss_event_handler_set(gnss_event_handler);
 	if (err) {
-		LOG_ERR("nrf_modem_gnss_event_handler_set failed, err: %d", err);
+		LOG_ERR("nrf_modem_gnss_event_handler_set failed, err: %d", 
+			err);
 		return publish_error(err);
 	}
 
 	err = nrf_modem_gnss_fix_interval_set(CONFIG_GNSS_PERIODIC_INTERVAL);
 	if (err) {
-		LOG_ERR("nrf_modem_gnss_fix_interval_set failed, err: %d", err);
+		LOG_ERR("nrf_modem_gnss_fix_interval_set failed, err: %d", 
+			err);
 		return publish_error(err);
 	}
 
 	err = nrf_modem_gnss_fix_retry_set(CONFIG_GNSS_PERIODIC_TIMEOUT);
 	if (err) {
-		LOG_ERR("nrf_modem_gnss_fix_retry_set failed, err: %d", err);
+		LOG_ERR("nrf_modem_gnss_fix_retry_set failed, err: %d", 
+			err);
 		return publish_error(err);
 	}
 
@@ -127,14 +136,16 @@ int gnss_start(void)
 
 	err = lte_lc_func_mode_set(LTE_LC_FUNC_MODE_NORMAL);
 	if (err) {
-		LOG_ERR("lte_lc_func_mode_set failed, err: %d", err);
+		LOG_ERR("lte_lc_func_mode_set failed, err: %d", 
+			err);
 		return publish_error(err);
 	}
 
 	LOG_INF("Starting GNSS");
 	err = nrf_modem_gnss_start();
 	if (err) {
-		LOG_ERR("nrf_modem_gnss_start failed, err: %d", err);
+		LOG_ERR("nrf_modem_gnss_start failed, err: %d", 
+			err);
 		return publish_error(err);
 	}
 
