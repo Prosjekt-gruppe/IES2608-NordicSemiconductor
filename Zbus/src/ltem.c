@@ -50,20 +50,23 @@ int ltem_init(void)
 	LOG_INF("Initializing modem library");
 	err = nrf_modem_lib_init();
 	if (err) {
-		LOG_ERR("nrf_modem_lib_init failed, err: %d", err);
+		LOG_ERR("nrf_modem_lib_init failed, err: %d", 
+			err);
 		return publish_error(err);
 	}
 
 	err = lte_lc_system_mode_set(LTE_LC_SYSTEM_MODE_LTEM_GPS,
 				     LTE_LC_SYSTEM_MODE_PREFER_AUTO);
 	if (err) {
-		LOG_ERR("lte_lc_system_mode_set failed, err: %d", err);
+		LOG_ERR("lte_lc_system_mode_set failed, err: %d", 
+			err);
 		return publish_error(err);
 	}
 
 	err = lte_lc_func_mode_set(LTE_LC_FUNC_MODE_NORMAL);
 	if (err) {
-		LOG_ERR("lte_lc_func_mode_set failed, err: %d", err);
+		LOG_ERR("lte_lc_func_mode_set failed, err: %d", 
+			err);
 		return publish_error(err);
 	}
 
@@ -80,7 +83,8 @@ int ltem_connect(void)
 
 	err = lte_lc_connect_async(lte_handler);
 	if (err) {
-		LOG_ERR("lte_lc_connect_async failed, err: %d", err);
+		LOG_ERR("lte_lc_connect_async failed, err: %d", 
+			err);
 		return publish_error(err);
 	}
 
