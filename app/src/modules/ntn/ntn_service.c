@@ -40,8 +40,6 @@ static int ntn_service_prepare(struct app_ctx *ctx)
     }
 
     if (ctx->have_fix) {
-        err = ntn_location_set(ctx->last_pvt.latitude,
-                               ctx->last_pvt.longitude,
         err = ntn_location_set((double)ctx->last_pvt.latitude / 1e7,
                                (double)ctx->last_pvt.longitude / 1e7,
                                (float)ctx->last_pvt.altitude,
