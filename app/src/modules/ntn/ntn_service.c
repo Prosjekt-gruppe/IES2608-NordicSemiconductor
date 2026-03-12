@@ -51,7 +51,6 @@ static void lte_lc_evt_handler(const struct lte_lc_evt *const evt)
     }
 }
 
-/* simple connect attempt no udp */
 int ntn_service_connect(struct app_ctx *ctx)
 {
     int err;
@@ -81,8 +80,8 @@ int ntn_service_connect(struct app_ctx *ctx)
     }
 
     if (ctx->have_fix) {
-        err = ntn_location_set((double)ctx->last_pvt.latitude / 1e7,
-                               (double)ctx->last_pvt.longitude /1e7,
+        err = ntn_location_set(ctx->last_pvt.latitude,
+                               ctx->last_pvt.longitude,
                                (float)ctx->last_pvt.altitude,
                                0);
         if (err) {
@@ -91,7 +90,6 @@ int ntn_service_connect(struct app_ctx *ctx)
         }
     }
 
-    /* configure for ntn */
     err = lte_lc_system_mode_set(LTE_LC_SYSTEM_MODE_NTN_NBIOT,
                                  LTE_LC_SYSTEM_MODE_PREFER_AUTO);
     if (err) {
@@ -99,7 +97,6 @@ int ntn_service_connect(struct app_ctx *ctx)
         return err;
     }
 
-    /* actual connect attempt */
     err = lte_lc_connect_async(lte_lc_evt_handler);
     if (err) {
         return err;
@@ -107,4 +104,3 @@ int ntn_service_connect(struct app_ctx *ctx)
 
     return 0;
 }
-
