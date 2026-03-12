@@ -17,7 +17,7 @@
 
 LOG_MODULE_REGISTER(app_sm, LOG_LEVEL_INF);
 
-ZBUS_MSG_SUBSCRIBER_DEFINE(app_fsm_sub);
+ZBUS_MSG_SUBSCRIBER_DEFINE(app_fsm_sub); //Subscriber for app events and GNSS status updates
 
 union app_sm_msg {
     struct app_event app_event;
