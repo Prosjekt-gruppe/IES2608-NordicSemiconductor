@@ -6,7 +6,5 @@
 
 #pragma once
 
-#include "app_types.h"
-
-//int ntn_service_prepare(struct app_ctx *ctx);
-int ntn_service_connect(struct app_ctx *ctx);
+int modem_service_init(void);
+int modem_service_connect_async(void);
