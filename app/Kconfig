@@ -1,0 +1,19 @@
+#
+# Copyright (c) 2024 Nordic Semiconductor ASA
+#
+# SPDX-License-Identifier: LicenseRef-Nordic-5-Clause
+#
+
+source "Kconfig.zephyr"
+
+menu "LTEM-NTN Fallback Testbench"
+
+# state machine config (can be board specific)
+config APP_GNSS_TIMEOUT_SEC
+    int "GNSS timeout in seconds"
+    default 10
+    range 1 600
+    help
+      Timeout for GNSS acquisition before continuing.
+
+endmenu

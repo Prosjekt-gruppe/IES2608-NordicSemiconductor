@@ -71,7 +71,6 @@ struct app_ctx {
     /* events */
     struct app_event ev;
     
-    //struct k_mutex lock;
 };
 
 /*

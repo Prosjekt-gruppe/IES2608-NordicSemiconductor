@@ -4,15 +4,12 @@
  * SPDX-License-Identifier: LicenseRef-Nordic-5-Clause
  */ 
 
-
-
-
 #include "app_events.h"
 
 K_MSGQ_DEFINE(app_evt_q, sizeof(struct app_event), 16, 4);
 
 
-/* common app event helper function */
+/* common app event helper functions */
 int app_event_put(const struct app_event *ev, k_timeout_t timeout)
 {
     return k_msgq_put(&app_evt_q, ev, timeout);

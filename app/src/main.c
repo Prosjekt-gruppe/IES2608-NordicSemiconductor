@@ -18,6 +18,7 @@
 
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
+#include <zephyr/app_version.h>
 
 #include "app_types.h"
 #include "app_events.h"
@@ -41,6 +42,9 @@ int main(void)
     struct app_event boot = { .type = EVT_BOOT };
 
     app_event_put(&boot, K_NO_WAIT);
+
+
+    LOG_INF("Firmware version: %s", APP_VERSION_STRING);
     
     
     //k_msgq_put(&app_evt_q, &boot, K_NO_WAIT);
@@ -52,8 +56,6 @@ int main(void)
 
 
     while (1) {
-        //k_sleep(K_SECONDS(60));
-
         //int32_t rem = k_timer_remaining_get(&timeout_timer);
         //uint32_t st = k_timer_status_get(&timeout_timer);
 

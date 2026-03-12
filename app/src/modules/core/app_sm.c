@@ -98,7 +98,7 @@ static void gnss_acquire_entry(void *obj)
 {
     ARG_UNUSED(obj);
 
-    (void)gnss_service_start_timeout(10);
+    (void)gnss_service_start_timeout(CONFIG_APP_GNSS_TIMEOUT_SEC);
     (void)gnss_service_start();
 
     LOG_INF("(%s) GNSS_ACQUIRE entry done", __func__);
@@ -126,6 +126,16 @@ static enum smf_state_result gnss_acquire_run(void *obj)
     case EVT_GNSS_TIMEOUT:
         LOG_INF("GNSS_ACQUIRE: gnss timeout");
         (void)gnss_service_stop();
+
+        /* ONLY FOR TESTING */
+        ctx->last_pvt.latitude  = 634305000;   /* 63.4305° */
+        ctx->last_pvt.longitude = 103951000;   /* 10.3951° */
+        ctx->last_pvt.altitude  = 10;
+
+        ctx->have_fix = true;
+
+        LOG_INF("Using fallback GNSS position (Trondheim)");
+
         smf_set_state(SMF_CTX(ctx), &states[STATE_NTN_CONNECTING]);
         return SMF_EVENT_HANDLED;
 
