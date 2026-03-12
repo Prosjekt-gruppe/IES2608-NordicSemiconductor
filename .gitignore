@@ -52,3 +52,5 @@ build*/
 # Python
 .pytest_cache/
 __pycache__/
+
+ntn_log.txt
