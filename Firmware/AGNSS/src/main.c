@@ -10,6 +10,7 @@
 #include <modem/lte_lc.h>
 #include <modem/location.h>
 #include <modem/nrf_modem_lib.h>
+#include <modem/modem_battery.h>
 #include <date_time.h>
 #include <zephyr/logging/log.h>
 #include <net/nrf_cloud_coap.h>
@@ -17,14 +18,10 @@
 #include <zephyr/smf.h>
 
 LOG_MODULE_REGISTER(app, LOG_LEVEL_INF);
+
 static void print_location(double latitude, double longitude, uint32_t accuracy);
 static void handle_cloud_location_request(const struct lte_lc_cells_info *cell_info);
-static void print_location(double latitude, double longitude, uint32_t accuracy)
-{
-	LOG_INF("Lat: %f, Lon: %f, Uncertainty: %u m", latitude, longitude, accuracy);
-	LOG_INF("Google maps URL: https://maps.google.com/?q=%.06f,%.06f",
-		latitude, longitude);
-}
+
 // 1. Define States 
 enum app_state {
 	STATE_BOOT, 
@@ -35,6 +32,8 @@ enum app_state {
 	STATE_COAP_CONNECT,
 	STATE_LOCATION_REQUEST,
 	STATE_WAIT_LOCATION,
+	STATE_BATTERY_SAMPLE,
+	STATE_BATTERY_SEND, 
 	STATE_DONE,
 	STATE_ERROR,
 };
@@ -50,6 +49,11 @@ enum app_evt_type {
 	EVT_LOCATION_ERROR,
 	EVT_CLOUD_LOC_READY,
 	EVT_CLOUD_LOC_ERROR,
+
+	EVT_BATTERY_SAMPLE_READY,
+	EVT_BATTERY_SEND_DONE,
+	EVT_BATTERY_SEND_ERROR,
+	EVT_BATTERY_LOW,
 };
 
 // 3. Define SMF context object
@@ -57,6 +61,7 @@ struct app_ctx {
 	struct smf_ctx ctx; 
 
 	enum app_evt_type evt; 
+	bool lte_connected; 
 	int err; 
 
 	struct nrf_cloud_location_config config;	
@@ -64,6 +69,11 @@ struct app_ctx {
 	double lat; 
 	double lon; 
 	uint32_t unc; 
+
+	//Battery 
+	int battery_mv;
+	int battery_pct; 
+	bool battery_low; 
 }; 
 
 
@@ -93,7 +103,7 @@ static void lte_event_handler(const struct lte_lc_evt *const evt)
 			if ((evt->nw_reg_status == LTE_LC_NW_REG_REGISTERED_HOME) ||
 				(evt->nw_reg_status == LTE_LC_NW_REG_REGISTERED_ROAMING)) {
 				LOG_INF("Connected to network");
-				app.evt = EVT_LTE_CONNECTED;
+				app.lte_connected = true;
 		}
 	}
 }
@@ -146,6 +156,8 @@ static void location_event_handler(const struct location_event_data *event_data)
 static void boot_entry(void *obj);
 static enum smf_state_result boot_run(void *obj);
 
+
+
 static void wait_lte_entry(void *obj);
 static enum smf_state_result wait_lte_run(void *obj);
 
@@ -166,6 +178,12 @@ static enum smf_state_result location_request_run(void *obj);
 
 static enum smf_state_result wait_location_run(void *obj);
 
+static void battery_sample_entry(void *obj);
+static enum smf_state_result battery_sample_run(void *obj);
+
+static void battery_send_entry(void *obj);
+static enum smf_state_result battery_send_run(void *obj);
+
 static void done_entry(void *obj);
 static void error_entry(void *obj);
 
@@ -180,6 +198,8 @@ static const struct smf_state app_states[] = {
 	[STATE_COAP_CONNECT]     = SMF_CREATE_STATE(coap_connect_entry, coap_connect_run, NULL, NULL, NULL),
 	[STATE_LOCATION_REQUEST] = SMF_CREATE_STATE(location_request_entry, location_request_run, NULL, NULL, NULL),
 	[STATE_WAIT_LOCATION]    = SMF_CREATE_STATE(NULL, wait_location_run, NULL, NULL, NULL),
+	[STATE_BATTERY_SAMPLE]   = SMF_CREATE_STATE(battery_sample_entry, battery_sample_run, NULL, NULL, NULL),
+	[STATE_BATTERY_SEND]     = SMF_CREATE_STATE(battery_send_entry, battery_send_run, NULL, NULL, NULL),
 	[STATE_DONE]             = SMF_CREATE_STATE(done_entry, NULL, NULL, NULL, NULL),
 	[STATE_ERROR]            = SMF_CREATE_STATE(error_entry, NULL, NULL, NULL, NULL),
 };
@@ -224,7 +244,7 @@ static enum smf_state_result boot_run(void *obj)
 static void wait_lte_entry(void *obj)
 {
 	struct app_ctx *ctx = obj;
-
+	
 	LOG_INF("Connecting to LTE...");
 	ctx->evt = EVT_NONE;
 	ctx->err = lte_lc_connect();
@@ -236,17 +256,27 @@ static enum smf_state_result wait_lte_run(void *obj)
 {
 	struct app_ctx *ctx = obj;
 
+	//Debug 
+	LOG_INF("wait_lte_run: err=%d evt%d lte=%d", ctx->err, ctx->evt, ctx->lte_connected);
+
 	if (ctx->err) {
 		smf_set_state(SMF_CTX(ctx), &app_states[STATE_ERROR]);
 		return SMF_EVENT_HANDLED;
 	}
 
-	if (ctx->evt == EVT_LTE_CONNECTED) {
-		ctx->evt = EVT_NONE;
+		if (ctx->lte_connected) {
+
+		ctx->lte_connected = false;
 
 		if (IS_ENABLED(CONFIG_DATE_TIME)) {
+
+			LOG_INF("Transitioning to STATE_WAIT_TIME");
+
 			smf_set_state(SMF_CTX(ctx), &app_states[STATE_WAIT_TIME]);
 		} else {
+
+			LOG_INF("Transitioning to STATE_LOCATION_INIT");
+
 			smf_set_state(SMF_CTX(ctx), &app_states[STATE_LOCATION_INIT]);
 		}
 	}
@@ -259,6 +289,9 @@ static void wait_time_entry(void *obj)
 {
 	struct app_ctx *ctx = obj;
 	ARG_UNUSED(ctx);
+
+	// Debug
+	LOG_INF("Entered STATE_WAIT_TIME");
 
 	LOG_INF("Waiting for current time");
 }
@@ -310,6 +343,9 @@ static void coap_init_entry(void *obj)
 {
 	struct app_ctx *ctx = obj;
 
+	//Debug
+	LOG_INF("Entered STATE_COAP_INIT");
+
 	ctx->err = nrf_cloud_coap_init();
 	if (ctx->err) {
 		LOG_ERR("Failed to initialize CoAP client: %d", ctx->err);
@@ -359,6 +395,9 @@ static void location_request_entry(void *obj)
 {
 	struct app_ctx *ctx = obj;
 
+	//Debug
+	LOG_INF("Entered STATE_LOCATION_REQUEST");
+
 	LOG_INF("Requesting location with the default configuration...");
 
 	ctx->evt = EVT_NONE;
@@ -388,17 +427,19 @@ static enum smf_state_result wait_location_run(void *obj)
 
 	switch (ctx->evt) {
 	case EVT_LOCATION_READY:
-	case EVT_CLOUD_LOC_READY:
-		smf_set_state(SMF_CTX(ctx), &app_states[STATE_DONE]);
+		ctx->evt = EVT_NONE;
+		smf_set_state(SMF_CTX(ctx), &app_states[STATE_BATTERY_SAMPLE]);
 		break;
 
 	case EVT_LOCATION_TIMEOUT:
+		ctx->evt = EVT_NONE;
 		ctx->err = -ETIMEDOUT;
 		smf_set_state(SMF_CTX(ctx), &app_states[STATE_ERROR]);
 		break;
 
 	case EVT_LOCATION_ERROR:
 	case EVT_CLOUD_LOC_ERROR:
+		ctx->evt = EVT_NONE;
 		if (ctx->err == 0) {
 			ctx->err = -EIO;
 		}
@@ -418,7 +459,12 @@ static void done_entry(void *obj)
 	struct app_ctx *ctx = obj;
 
 	print_location(ctx->lat, ctx->lon, ctx->unc);
-	smf_set_terminate(SMF_CTX(ctx), 0);
+
+	LOG_INF("Waiting %d seconds before next report", CONFIG_REPORT_INTERVAL_SECONDS);
+
+	k_sleep(K_SECONDS(CONFIG_REPORT_INTERVAL_SECONDS));
+
+	smf_set_state(SMF_CTX(ctx), &app_states[STATE_LOCATION_REQUEST]);
 }
 
 static void error_entry(void *obj)
@@ -429,12 +475,125 @@ static void error_entry(void *obj)
 	smf_set_terminate(SMF_CTX(ctx), ctx->err ? ctx->err : -1);
 }
 
+// 16. Battery 
+static int battery_sample(struct app_ctx *ctx)
+{
+	int err; 
+
+	if (ctx == NULL) {
+		return -EINVAL;
+	}
+
+	// Get Modem Voltage
+	err = modem_battery_voltage_get(&ctx->battery_mv);
+
+	if (err){
+		LOG_ERR("Battery voltage read failed, err: %d", err);
+		return err;
+	}
+
+	LOG_INF("Battery sampled: %d mV", ctx->battery_mv);
+
+	return 0;
+}
+
+static int cloud_send_battery(const struct app_ctx *ctx)
+{
+	int err; 
+	char msg[100];
+	
+	if (ctx == NULL) {
+		return -EINVAL;
+	}
+
+	snprintk(msg, sizeof(msg),
+		 "{\"appId\":\"BATTERY\",\"messageType\":\"DATA\",\"data\":%d}",
+		 ctx->battery_mv);
+
+
+	err = nrf_cloud_coap_json_message_send(msg,false,true);
+	if (err){
+		LOG_ERR("Failed to send battery data: %d", err); 
+		return err; 
+	}
+
+	LOG_INF("Battery voltage sent: %d mV", ctx->battery_mv);
+	
+	return 0;
+}
+
+
+static void battery_sample_entry(void *obj)
+{
+	struct app_ctx *ctx = obj;
+
+	// Debug
+	LOG_INF("ENtered STATE_BATTERY_SAMPLE");
+
+	ctx->err = battery_sample(ctx);
+	if (ctx->err) {
+		LOG_ERR("Battery sample failed: %d", ctx->err);
+		return;
+	}
+}
+
+
+static enum smf_state_result battery_sample_run(void *obj)
+{
+	struct app_ctx *ctx = obj;
+
+	if (ctx->err) {
+		smf_set_state(SMF_CTX(ctx), &app_states[STATE_ERROR]);
+	} else {
+		smf_set_state(SMF_CTX(ctx), &app_states[STATE_BATTERY_SEND]);
+	}
+
+	return SMF_EVENT_HANDLED;
+}
+
+static void battery_send_entry(void *obj)
+{
+	struct app_ctx *ctx = obj;
+
+	//DEBUG
+	LOG_INF("ENTERED STATE_BATTERY_SEND");
+
+	ctx->err = cloud_send_battery(ctx);
+	if (ctx->err) {
+		LOG_ERR("Battery send failed: %d", ctx->err);
+	}
+}
+
+static enum smf_state_result battery_send_run(void *obj)
+{
+	struct app_ctx *ctx = obj;
+
+	if (ctx->err) {
+		smf_set_state(SMF_CTX(ctx), &app_states[STATE_ERROR]);
+	} else {
+		smf_set_state(SMF_CTX(ctx), &app_states[STATE_DONE]);
+	}
+
+	return SMF_EVENT_HANDLED;
+}
+
+// Printing Location to nRF Cloud
+
+static void print_location(double latitude, double longitude, uint32_t accuracy)
+{
+	LOG_INF("Lat: %f, Lon: %f, Uncertainty: %u m", latitude, longitude, accuracy);
+	LOG_INF("Google maps URL: https://maps.google.com/?q=%.06f,%.06f",
+		latitude, longitude);
+}
+
 
 // Cloud location request
 static void handle_cloud_location_request(const struct lte_lc_cells_info *cell_info)
 {
 	int err = 0;
 	struct nrf_cloud_location_result cell_pos_result = {0};
+	struct location_data loc = {0};
+
 	const struct nrf_cloud_rest_location_request cell_pos_req = {
 		.config = &app.config,
 		.cell_info = (struct lte_lc_cells_info *)cell_info,
@@ -456,15 +615,29 @@ static void handle_cloud_location_request(const struct lte_lc_cells_info *cell_i
 		cell_pos_result.type == LOCATION_TYPE_MULTI_CELL ? "multi-cell" :
 		"unknown");
 
-	if (app.config.do_reply) {
-		app.lat = cell_pos_result.lat;
-		app.lon = cell_pos_result.lon;
-		app.unc = cell_pos_result.unc;
-	} else {
-		LOG_INF("Result of location request only stored in nRF Cloud.");
-	}
 
-	app.evt = EVT_CLOUD_LOC_READY;
+	// Local copy for logs 
+	app.lat = cell_pos_result.lat;
+	app.lon = cell_pos_result.lon;
+	app.unc = cell_pos_result.unc;
+	
+
+	// Pass the external result back to the location library
+	loc.latitude = cell_pos_result.lat; 
+	loc.longitude = cell_pos_result.lon;
+	loc.accuracy = cell_pos_result.unc; 
+
+	location_cloud_location_ext_result_set(LOCATION_EXT_RESULT_SUCCESS,&loc);
+	
+	/*
+	if (err){
+		LOG_ERR("Failed to provide external location result to library: %d", err);
+		app.err = err;
+		app.evt = EVT_CLOUD_LOC_ERROR;
+		return;
+	}
+	*/
+
 }
 
 int main(void)
