@@ -6,16 +6,16 @@
 
 #include "app_events.h"
 
-K_MSGQ_DEFINE(app_evt_q, sizeof(struct app_event), 16, 4);
+ZBUS_OBS_DECLARE(app_fsm_sub);
 
+ZBUS_CHAN_DEFINE(app_evt_chan,
+                 struct app_event,
+                 NULL,
+                 NULL,
+                 ZBUS_OBSERVERS(app_fsm_sub),
+                 ZBUS_MSG_INIT(.type = EVT_BOOT));
 
-/* common app event helper functions */
 int app_event_put(const struct app_event *ev, k_timeout_t timeout)
 {
-    return k_msgq_put(&app_evt_q, ev, timeout);
-}
-
-int app_event_get(struct app_event *ev, k_timeout_t timeout)
-{
-    return k_msgq_get(&app_evt_q, ev, timeout);
+    return zbus_chan_pub(&app_evt_chan, ev, timeout);
 }
