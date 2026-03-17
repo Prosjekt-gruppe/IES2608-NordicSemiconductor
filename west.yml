@@ -1,0 +1,18 @@
+manifest:
+  version: 0.13
+
+  remotes:
+    - name: zephyrproject
+      url-base: https://github.com/zephyrproject-rtos
+    - name: nordicsemi
+      url-base: https://github.com/nrfconnect
+
+  projects:
+    - name: zephyr
+      remote: zephyrproject
+      revision: v4.1.0
+      import:
+        path-prefix: deps
+
+  self:
+    path: IES2608-NordicSemiconductor
