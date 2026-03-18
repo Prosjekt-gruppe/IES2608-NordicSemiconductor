@@ -61,7 +61,7 @@ int modem_service_init(void){
 
     err = nrf_modem_lib_init(); 
     if (err){
-        LOG_ERR("nrf_modem_lib_init failed: %d, err"); 
+        LOG_ERR("nrf_modem_lib_init failed: %u, err"); 
         return err; 
     }
 

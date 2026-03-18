@@ -5,6 +5,38 @@ If you follow this step-by-step, you should be up and running without issues.
 
 ---
 
+## 0. Install required dependencies
+
+Before using `west`, you need the Nordic toolchain and utilities installed.
+
+### Install nRF Util
+
+Follow the official instructions for your OS:  
+https://docs.nordicsemi.com/bundle/nrfutil/page/README.html
+
+### Install sdk-manager
+
+```bash
+nrfutil install sdk-manager
+```
+
+### Install the Nordic toolchain (NCS)
+
+```bash
+nrfutil sdk-manager install v3.1.0
+```
+
+### Launch the toolchain environment
+
+```bash
+nrfutil sdk-manager toolchain launch --ncs-version v3.1.0 --terminal
+```
+
+This opens a new terminal with everything configured (west, Python, Zephyr, etc).  
+Use that terminal for all the steps below.
+
+---
+
 ## 1. Pick a place for your workspace
 
 Don’t do this inside the repo itself. Go somewhere clean:
@@ -19,7 +51,7 @@ cd ~/west-workspace
 ## 2. Clone the project
 
 ```bash
-git clone <your-repo-url> IES2608-NordicSemiconductor
+git clone https://github.com/Prosjekt-gruppe/IES2608-NordicSemiconductor IES2608-NordicSemiconductor
 ```
 
 ---
@@ -78,32 +110,37 @@ west flash
 
 ## A couple of things that will save you pain
 
-* Don’t run `west init` inside `app/` or inside the repo
-* Always run `west` commands from the workspace root
+* Don’t run `west init` inside `app/` or inside the repo  
+* Always run `west` commands from the workspace root  
+* Always use the terminal launched by `nrfutil sdk-manager`  
 * If something weird happens, try:
 
-  ```bash
-  west update
-  ```
+```bash
+west update
+```
 
 ---
 
 ## If things break
 
-**“unknown command build”**
-→ you’re not inside a west workspace
+**“unknown command build”**  
+→ you’re not inside a west workspace  
 
-**“no west workspace found”**
-→ you skipped `west init`
+**“no west workspace found”**  
+→ you skipped `west init`  
 
-**build errors about missing stuff**
-→ run `west update` again
+**build errors about missing stuff**  
+→ run `west update` again or make sure you’re using the toolchain terminal  
 
 ---
 
 ## TL;DR
 
 ```bash
+nrfutil install sdk-manager
+nrfutil sdk-manager install v3.1.0
+nrfutil sdk-manager toolchain launch --ncs-version v3.1.0 --terminal
+
 mkdir workspace
 cd workspace
 git clone <repo>
