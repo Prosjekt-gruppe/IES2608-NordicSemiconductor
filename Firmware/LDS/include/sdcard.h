@@ -64,13 +64,13 @@ void readFile(fs::FS &fs, const char * path){
   file.close();
 }
 
-void createFile(fs::FS &fs, const char * header){
-  // Create CSV file with header if it doesn't exist
-  if (!SD.exists(FILENAME)) {
+//Checks if file exists and if not, it creates 
+void createFile(fs::FS &fs, const char * path, const char * header){
+  if (!fs.exists(path)) {
     Serial.println("File doesn't exist. Creating...");
-    File file = SD.open(FILENAME, FILE_WRITE);
+    File file = fs.open(path, FILE_WRITE);
     if (file) {
-      file.println(header); // CSV header
+      file.println(header);
       file.close();
       Serial.println("File created with header");
     } else {

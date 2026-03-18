@@ -4,7 +4,8 @@
 const char *trackingfile = "/Tracking.csv";  // CSV file
 const char *PPKfile = "/PPK.csv";  // CSV file
 
-uint32_t counter = 0;                      // Sample counter 
+uint32_t ppkcounter = 0; //file line indicator
+uint32_t trackingcounter = 0;
 
 void setup() {
   
@@ -24,8 +25,8 @@ void setup() {
   }
   Serial.println("SD card initialized successfully!");
 
-  createFile(trackingfile,"data num, Lat, Lot, Accuracy");
-  createFile(PPKfile,"data num, Lat, Lot, Accuracy");
+  createFile(SD,trackingfile,"data num, Lat, Lon, Accuracy");
+  createFile(SD,PPKfile,"data num, current, e");
 }
 
 void loop() {
