@@ -70,6 +70,9 @@ struct app_ctx {
     
     /* events */
     struct app_event ev;
+
+    /* lte */
+   	bool lte_connected; 
     
 };
 
