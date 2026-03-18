@@ -38,7 +38,7 @@ enum app_evt_type {
     EVT_NTN_TIMEOUT,
     EVT_TIMEOUT,
     EVT_RSRP_UPDATE,
-    EVT_NTN_FALLBACK_REQUEST,
+    EVT_LTE_POOR,
 };
 
 struct app_event {

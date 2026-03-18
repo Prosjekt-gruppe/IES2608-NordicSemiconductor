@@ -12,7 +12,7 @@
  #include <zephyr/logging/log.h>
 
 
-LOG_MODUEL_REGISTER(app, LOG_LEVEL_INF);
+LOG_MODULE_REGISTER(lte_service, LOG_LEVEL_INF);
 
 static bool lte_connected; 
 
@@ -22,6 +22,7 @@ static int publish_evt(enum app_evt_type type)
         .type = type,
     };
 
+    LOG_INF("Publishing %s", app_evt_name(type));
     return app_event_put(&ev, K_NO_WAIT); 
 }
 
@@ -40,9 +41,14 @@ static void lte_lc_evt_handler(const struct lte_lc_evt *const evt)
 
     switch (evt->type) {
     case LTE_LC_EVT_NW_REG_STATUS:
+        LOG_INF("LTE NW registration status: %d", evt->nw_reg_status);
+
+
         switch (evt->nw_reg_status) {
         case LTE_LC_NW_REG_REGISTERED_HOME:
         case LTE_LC_NW_REG_REGISTERED_ROAMING:
+            lte_connected=true;
+            LOG_INF("LTE registered on network");
             app_ev.type = EVT_REG_OK;
             (void)app_event_put(&app_ev, K_NO_WAIT);
             break;
@@ -51,6 +57,8 @@ static void lte_lc_evt_handler(const struct lte_lc_evt *const evt)
         case LTE_LC_NW_REG_REGISTRATION_DENIED:
         case LTE_LC_NW_REG_UNKNOWN:
         case LTE_LC_NW_REG_UICC_FAIL:
+            lte_connected=false;
+            LOG_WRN("LTE registration failed/status=%d", evt->nw_reg_status);
             app_ev.type = EVT_REG_FAIL;
             (void)app_event_put(&app_ev, K_NO_WAIT);
             break;
@@ -69,6 +77,7 @@ static void lte_lc_evt_handler(const struct lte_lc_evt *const evt)
         break;
 
     default:
+        LOG_DBG("Unhandled LTE evnt type: %d", evt->type);
         break;
     }
 }
@@ -134,4 +143,19 @@ int lte_service_get_rsrp(int *rsrp_dbm)
     *rsrp_dbm = rsrp_raw - 141;
 
     return 0;
+}
+
+int lte_service_sample_and_publish_rsrp(void)
+{
+    int err;
+    int rsrp_dbm;
+
+    err = lte_service_get_rsrp(&rsrp_dbm); 
+    if (err)
+    {
+        return err; 
+    }
+
+    LOG_INF("LTE RSRP: %d dBm", rsrp_dbm); 
+    return publish_rsrp_evt(rsrp_dbm);
 }
