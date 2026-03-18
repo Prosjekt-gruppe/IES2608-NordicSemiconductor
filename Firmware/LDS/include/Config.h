@@ -1,12 +1,22 @@
+#include <Arduino.h>
+#include <Wire.h>
+#include <WiFi.h>
+// MicroSD Libraries
+#include <SD.h>
+#include <SPI.h>
+#include <FS.h>
 
-
-//I2C config
-#define SDA_PIN 21
-#define SCL_PIN 22
-#define CAM_SDA_PIN 14
-#define CAM_SCL_PIN 15
+//Arduino Esp32 nano config
+#define SDA_PIN A4
+#define SCL_PIN A5
 #define masterAdr 0x00
-#define slaveAdr 0x01
+#define slaveAdr 0x0f
+#define CS D4         
+#define SCLK D13
+#define MISO D12
+#define MOSI D11
+
+
 
 //Serial config
 #define BAUDRATE 115200
