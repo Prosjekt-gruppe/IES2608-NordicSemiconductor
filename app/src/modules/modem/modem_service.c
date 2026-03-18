@@ -15,7 +15,6 @@
 
 LOG_MODULE_REGISTER(modem_service, LOG_LEVEL_INF);
 
-
 static void lte_lc_evt_handler(const struct lte_lc_evt *const evt)
 {
     struct app_event app_ev = {0};
@@ -55,19 +54,17 @@ static void lte_lc_evt_handler(const struct lte_lc_evt *const evt)
     }
 }
 
-
 int modem_service_init(void){ 
     int err; 
 
     err = nrf_modem_lib_init(); 
     if (err){
-        LOG_ERR("nrf_modem_lib_init failed: %u, err"); 
+        LOG_ERR("nrf_modem_lib_init failed: %u", err); 
         return err; 
     }
 
     return 0;
 }
-
 
 int modem_service_connect_async(void)
 {
