@@ -5,16 +5,15 @@
  */ 
 
 
-/*
+
 #include <modem/nrf_modem_lib.h>
 #include <nrf_modem_gnss.h>
-#include <zephyr/kernel.h>
-#include <zephyr/logging/log.h>
+
+
 #include <zephyr/smf.h>
 #include <zephyr/sys/printk.h>
 #include <modem/lte_lc.h>
 #include <modem/ntn.h>
-*/
 
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
