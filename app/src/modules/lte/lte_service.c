@@ -37,8 +37,6 @@ static int publish_rsrp_evt(int rsrp_dbm)
 
 static void lte_lc_evt_handler(const struct lte_lc_evt *const evt)
 {
-    struct app_event app_ev = {0};
-
     switch (evt->type) {
     case LTE_LC_EVT_NW_REG_STATUS:
         LOG_INF("LTE NW registration status: %d", evt->nw_reg_status);
@@ -49,8 +47,7 @@ static void lte_lc_evt_handler(const struct lte_lc_evt *const evt)
         case LTE_LC_NW_REG_REGISTERED_ROAMING:
             lte_connected=true;
             LOG_INF("LTE registered on network");
-            app_ev.type = EVT_REG_OK;
-            (void)app_event_put(&app_ev, K_NO_WAIT);
+            (void)publish_evt(EVT_REG_OK);
             break;
 
         case LTE_LC_NW_REG_NOT_REGISTERED:
@@ -59,8 +56,7 @@ static void lte_lc_evt_handler(const struct lte_lc_evt *const evt)
         case LTE_LC_NW_REG_UICC_FAIL:
             lte_connected=false;
             LOG_WRN("LTE registration failed/status=%d", evt->nw_reg_status);
-            app_ev.type = EVT_REG_FAIL;
-            (void)app_event_put(&app_ev, K_NO_WAIT);
+            (void)publish_evt(EVT_REG_FAIL);
             break;
 
         default:
