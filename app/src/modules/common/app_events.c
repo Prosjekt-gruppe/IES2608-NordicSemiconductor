@@ -32,6 +32,7 @@ const char *app_evt_name(enum app_evt_type type)
     case EVT_TIMEOUT: return "EVT_TIMEOUT";
     case EVT_RSRP_UPDATE: return "EVT_RSRP_UPDATE";
     case EVT_LTE_POOR: return "EVT_LTE_POOR";
+    case EVT_BACKOFF_TIMEOUT: return "EVT_BACKOFF_TIMEOUT";
     default: return "EVT_UNKNOWN";
     }
 }

@@ -39,6 +39,7 @@ enum app_evt_type {
     EVT_TIMEOUT,
     EVT_RSRP_UPDATE,
     EVT_LTE_POOR,
+    EVT_BACKOFF_TIMEOUT,
 };
 
 struct app_event {
@@ -73,7 +74,10 @@ struct app_ctx {
     struct app_event ev;
 
     /* lte */
-   	bool lte_connected; 
+   	bool lte_connected;
+
+    /* timers */
+    struct k_timer backoff_timer;
     
 };
 
