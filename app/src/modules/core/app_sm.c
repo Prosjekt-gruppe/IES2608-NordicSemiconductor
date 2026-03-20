@@ -6,11 +6,14 @@
 #include "app_sm.h"
 #include "app_events.h"
 #include "app_zbus.h"
+#include "rsrp_service.h"
+
+
 #include "gnss_service.h"
 #include "ntn_service.h"
 #include "modem_service.h"
 #include "lte_service.h"
-#include "modem_signal_monitor.h"
+
 
 #include <modem/nrf_modem_lib.h>
 #include <zephyr/kernel.h>
@@ -126,6 +129,12 @@ static void boot_entry(void *obj)
         return; 
     }
 
+    err = rsrp_service_init();
+    if (err){
+        LOG_ERR("rsrp_service_init err=%d", err); 
+        return; 
+    }
+
     /*
     err = gnss_service_init();
     if (err) {
@@ -200,7 +209,7 @@ static void ltem_connected_entry(void *obj)
     ctx->lte_connected = true;
     
 
-    err = lte_service_get_rsrp(&rsrp_dbm);
+    err = rsrp_service_get(&rsrp_dbm);
     if (!err) {
         ctx->rsrp_dbm = rsrp_dbm;
         LOG_INF("LTE RSRP on entry: %d dBm", rsrp_dbm);
@@ -208,8 +217,8 @@ static void ltem_connected_entry(void *obj)
         LOG_WRN("Could not read LTE RSRP: %d", err);
     }
     
-    err = modem_signal_monitor_start();
-    if (err) {
+    err = rsrp_service_start();
+    if (err < 0) {
         LOG_WRN("Failed to start LTE signal monitor: %d", err);
     }
 
@@ -246,7 +255,7 @@ static enum smf_state_result ltem_connected_run(void *obj)
 
 static void ltem_connected_exit(void *obj)
 {
-    int err = modem_signal_monitor_stop();
+    int err = rsrp_service_stop();
     if (err) {
         LOG_WRN("Failed to stop LTE signal monitor: %d", err);
     }
@@ -518,15 +527,14 @@ int app_sm_start(struct app_ctx *ctx)
 /*
 void app_sm_post_dispatch(struct app_ctx *ctx, const struct app_event *ev)
 {
-    int modem_signal_monitor_start(void);
-    int modem_signal_monitor_stop(void);
+
     int err;
 
     // ltem connect ok
     if (ev->type == EVT_REG_OK && ctx->next_rat != RAT_NTN &&
         ctx->active_rat == RAT_LTEM) {
-        err = modem_signal_monitor_start();
-        if (err) {
+        err = rsrp_service_start();
+        if (err < 0) {
             LOG_WRN("Failed to start LTE signal monitor: %d", err);
         }
         return;
@@ -539,7 +547,7 @@ void app_sm_post_dispatch(struct app_ctx *ctx, const struct app_event *ev)
         struct app_event ntn_ev = { .type = EVT_NTN_REG_FAIL };
 
         ctx->lte_connected = false;
-        (void)modem_signal_monitor_stop();
+        (void)rsrp_service_stop();
 
         err = ntn_service_connect(ctx);
         if (err) {

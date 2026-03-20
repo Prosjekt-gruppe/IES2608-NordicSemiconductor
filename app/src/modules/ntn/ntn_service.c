@@ -5,14 +5,62 @@
  */ 
 #include "ntn_service.h"
 #include "app_events.h"
-#include "modem_service.h"
 
 #include <modem/lte_lc.h>
 #include <modem/ntn.h>
+#include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
 
 LOG_MODULE_REGISTER(ntn_service, LOG_LEVEL_INF);
 
+static int publish_evt(enum app_evt_type type)
+{
+    struct app_event ev = {
+        .type = type, 
+    };
+    LOG_INF("Publishing %s", app_evt_name(type)); 
+    return app_event_put(&ev, K_NO_WAIT); 
+}
+
+static void ntn_lc_evt_handler(const struct lte_lc_evt *const evt)
+{
+    switch (evt->type) {
+    case LTE_LC_EVT_NW_REG_STATUS:
+        LOG_INF("NTN NW registration status: %d", evt->nw_reg_status);
+
+        switch (evt->nw_reg_status) {
+        case LTE_LC_NW_REG_REGISTERED_HOME:
+        case LTE_LC_NW_REG_REGISTERED_ROAMING:
+            LOG_INF("NTN registered on network");
+            (void)publish_evt(EVT_REG_OK);
+            break;
+
+        case LTE_LC_NW_REG_NOT_REGISTERED:
+        case LTE_LC_NW_REG_REGISTRATION_DENIED:
+        case LTE_LC_NW_REG_UNKNOWN:
+        case LTE_LC_NW_REG_UICC_FAIL:
+            LOG_WRN("NTN registration failed/status=%d", evt->nw_reg_status);
+            (void)publish_evt(EVT_REG_FAIL);
+            break;
+
+        default:
+            break;
+        }
+        break;
+
+    case LTE_LC_EVT_CELLULAR_PROFILE_ACTIVE:
+        LOG_INF("NTN cellular profile active");
+        break;
+
+    case LTE_LC_EVT_LTE_MODE_UPDATE:
+        LOG_INF("NTN mode update %d", evt->lte_mode);
+        break;
+
+    default:
+        LOG_DBG("Unhandled NTN event type: %d", evt->type);
+        break;
+    }
+}
 
 
 static int ntn_service_prepare(struct app_ctx *ctx)
@@ -68,5 +116,5 @@ int ntn_service_connect(struct app_ctx *ctx)
         return err;
     }
 
-    return modem_service_connect_async();
+    return lte_lc_connect_async(ntn_lc_evt_handler);
 }

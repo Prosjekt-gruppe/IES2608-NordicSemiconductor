@@ -17,12 +17,9 @@ target_sources(app PRIVATE src/main.c
     src/modules/lte/lte_service.c
     src/modules/modem/modem_service.c
     src/modules/ntn/ntn_service.c
+    src/modules/rsrp/rsrp_service.c
 )
 
-target_sources(app PRIVATE
-    src/modules/modem/modem_connect.c
-    src/modules/modem/modem_signal_monitor.c
-)
 
 target_include_directories(app PRIVATE
     src/modules/common
@@ -31,4 +28,5 @@ target_include_directories(app PRIVATE
     src/modules/lte
     src/modules/modem
     src/modules/ntn
+    src/modules/rsrp
 )

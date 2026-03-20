@@ -1,31 +1,38 @@
 /*
- * Copyright (c) 2026 Nordic Semiconductor ASA
- *
- * SPDX-License-Identifier: LicenseRef-Nordic-5-Clause
- */
+* RSRP Serivce.c : 
+*/
 
-#include "modem_signal_monitor.h"
-
+#include "rsrp_service.h"
 #include "app_events.h"
-#include "lte_service.h"
 
-#include <limits.h>
+#include <errno.h>
+#include <nrf_modem_at.h>
+#include <stdio.h>
+#include <stdint.h>
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
 
-LOG_MODULE_REGISTER(modem_signal_monitor, LOG_LEVEL_INF);
 
-static struct k_work_delayable ltem_signal_work;
+LOG_MODULE_REGISTER(rsrp_service, LOG_LEVEL_INF); 
+
+
+/*----- Defines ---------*/
+#define RSRP_HISTORY_LEN 6
+
+
+/*------ Variables -------*/
+static struct k_work_delayable rsrp_work;
 static bool initialized;
 static bool monitor_enabled;
 static bool fallback_requested;
 static int last_rsrp_dbm = INT32_MIN;
 
-#define RSRP_HISTORY_LEN 6
-
 static int rsrp_hist[RSRP_HISTORY_LEN];
 static uint8_t rsrp_hist_idx;
 static uint8_t rsrp_hist_count;
+
+
+/*---- Functions -------*/
 
 static void reset_signal_tracking(void)
 {
@@ -105,7 +112,7 @@ static bool should_publish_lte_poor(int rsrp_dbm)
     return weak_signal && (sharp_drop || worsening);
 }
 
-static void ltem_signal_work_handler(struct k_work *work)
+static void rsrp_work_handler(struct k_work *work)
 {
     int err;
     int rsrp_dbm;
@@ -116,10 +123,10 @@ static void ltem_signal_work_handler(struct k_work *work)
         return;
     }
 
-    err = lte_service_get_rsrp(&rsrp_dbm);
+    err = rsrp_service_get(&rsrp_dbm);
     if (err) {
-        LOG_WRN("lte_service_get_rsrp failed: %d", err);
-        (void)k_work_reschedule(&ltem_signal_work,
+        LOG_WRN("rsrp_service_get failed: %d", err);
+        (void)k_work_reschedule(&rsrp_work,
                                 K_SECONDS(CONFIG_APP_MODEM_SIGNAL_POLL_INTERVAL_SEC));
         return;
     }
@@ -136,32 +143,97 @@ static void ltem_signal_work_handler(struct k_work *work)
         return;
     }
 
-    (void)k_work_reschedule(&ltem_signal_work,
+    (void)k_work_reschedule(&rsrp_work,
                             K_SECONDS(CONFIG_APP_MODEM_SIGNAL_POLL_INTERVAL_SEC));
 }
 
-int modem_signal_monitor_start(void)
+int rsrp_service_get(int *rsrp_dbm)
 {
-    if (!initialized) {
-        k_work_init_delayable(&ltem_signal_work, ltem_signal_work_handler);
-        initialized = true;
+    int err;
+    char buf[64];   // bigger buffer = safer
+    int rxlev, ber, rscp, ecno, rsrq, rsrp_raw;
+
+    if (rsrp_dbm == NULL) {
+        return -EINVAL;
     }
 
-    reset_signal_tracking();
-    monitor_enabled = true;
+    err = nrf_modem_at_cmd(buf, sizeof(buf), "AT+CESQ");
+    if (err) {
+        LOG_ERR("AT+CESQ failed: %d", err);
+        return err;
+    }
 
-    return k_work_reschedule(&ltem_signal_work, K_NO_WAIT);
-}
+    LOG_DBG("CESQ response: %s", buf);
 
-int modem_signal_monitor_stop(void)
-{
-    monitor_enabled = false;
+    int parsed = sscanf(buf,
+                        "+CESQ: %d,%d,%d,%d,%d,%d",
+                        &rxlev, &ber, &rscp, &ecno, &rsrq, &rsrp_raw);
 
-    if (!initialized) {
+    if (parsed != 6) {
+        LOG_WRN("Failed to parse CESQ response");
+        return -EIO;
+    }
+
+    if (rsrp_raw == 255) {
+        LOG_WRN("RSRP not known");
+        return -ENOENT;
+    }
+
+    if (rsrp_raw == 0) {
+        LOG_WRN("RSRP < -140 dBm");
+        *rsrp_dbm = -141;   // or clamp to -140 depending on your policy
         return 0;
     }
 
+    *rsrp_dbm = rsrp_raw - 141;
+
+    return 0;
+}
+
+int rsrp_service_sample_and_publish(void)
+{
+    int err;
+    int rsrp_dbm;
+
+    err = rsrp_service_get(&rsrp_dbm); 
+    if (err)
+    {
+        return err; 
+    }
+
+    LOG_INF("LTE RSRP: %d dBm", rsrp_dbm); 
+    return publish_rsrp_event(EVT_RSRP_UPDATE, rsrp_dbm);
+}
+
+
+int rsrp_service_init(void){
+    if (initialized){
+        return 0;
+    }
+
+    k_work_init_delayable(&rsrp_work, rsrp_work_handler);
     reset_signal_tracking();
 
-    return k_work_cancel_delayable(&ltem_signal_work);
+    initialized = true;
+    return 0; 
+}
+
+int rsrp_service_start(void)
+{
+    if (!initialized) {
+        return -EINVAL;
+    }
+
+    monitor_enabled = true;
+    reset_signal_tracking();
+
+    return k_work_reschedule(&rsrp_work,
+        K_SECONDS(CONFIG_APP_MODEM_SIGNAL_POLL_INTERVAL_SEC));
+}
+
+int rsrp_service_stop(void)
+{
+    monitor_enabled = false;
+    reset_signal_tracking();
+    return k_work_cancel_delayable(&rsrp_work);
 }
