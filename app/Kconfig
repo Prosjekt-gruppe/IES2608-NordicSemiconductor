@@ -16,4 +16,27 @@ config APP_GNSS_TIMEOUT_SEC
     help
       Timeout for GNSS acquisition before continuing.
 
+config APP_MODEM_SIGNAL_POLL_INTERVAL_SEC
+    int "LTE-M signal poll interval in seconds"
+    default 10
+    range 1 3600
+    help
+      Interval used by the modem service when sampling LTE-M RSRP.
+
+config APP_MODEM_RSRP_FALLBACK_DBM
+    int "LTE-M RSRP threshold for NTN fallback"
+    default -105
+    range -140 -44
+    help
+      When the measured LTE-M RSRP is at or below this level and continues
+      to worsen, the modem service requests NTN fallback.
+
+config APP_MODEM_RSRP_DROP_DB
+    int "LTE-M RSRP drop needed to treat the trend as degrading"
+    default 5
+    range 1 40
+    help
+      Minimum drop in dB used by the modem service when deciding that the
+      LTE-M signal is degrading toward an NTN fallback.
+
 endmenu

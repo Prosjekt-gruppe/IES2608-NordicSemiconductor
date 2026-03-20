@@ -14,14 +14,21 @@ target_sources(app PRIVATE src/main.c
     src/modules/common/app_zbus.c
     src/modules/core/app_sm.c
     src/modules/gnss/gnss_service.c
+    src/modules/lte/lte_service.c
     src/modules/modem/modem_service.c
     src/modules/ntn/ntn_service.c
+)
+
+target_sources(app PRIVATE
+    src/modules/modem/modem_connect.c
+    src/modules/modem/modem_signal_monitor.c
 )
 
 target_include_directories(app PRIVATE
     src/modules/common
     src/modules/core
     src/modules/gnss
+    src/modules/lte
     src/modules/modem
     src/modules/ntn
 )
