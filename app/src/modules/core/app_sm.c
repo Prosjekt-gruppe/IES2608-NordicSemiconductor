@@ -13,7 +13,7 @@
 #include "ntn_service.h"
 #include "modem_service.h"
 #include "lte_service.h"
-#include "modem_signal_monitor.h"
+
 
 #include <modem/nrf_modem_lib.h>
 #include <zephyr/kernel.h>
@@ -217,8 +217,8 @@ static void ltem_connected_entry(void *obj)
         LOG_WRN("Could not read LTE RSRP: %d", err);
     }
     
-    err = modem_signal_monitor_start();
-    if (err) {
+    err = rsrp_service_start();
+    if (err < 0) {
         LOG_WRN("Failed to start LTE signal monitor: %d", err);
     }
 
@@ -255,7 +255,7 @@ static enum smf_state_result ltem_connected_run(void *obj)
 
 static void ltem_connected_exit(void *obj)
 {
-    int err = modem_signal_monitor_stop();
+    int err = rsrp_service_stop();
     if (err) {
         LOG_WRN("Failed to stop LTE signal monitor: %d", err);
     }
