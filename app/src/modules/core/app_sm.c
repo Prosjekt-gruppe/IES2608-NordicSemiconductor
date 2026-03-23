@@ -53,6 +53,11 @@ static void ntn_connecting_entry(void *obj);
 static enum smf_state_result ntn_connecting_run(void *obj);
 static void ntn_connecting_exit(void *obj);
 
+static void ntn_connected_entry(void *obj);
+static enum smf_state_result ntn_connected_run(void *obj);
+static void ntn_connected_exit(void *obj);
+
+
 static void handle_gnss_status(struct app_ctx *ctx, const struct app_gnss_status *status);
 
 
@@ -94,6 +99,13 @@ static const struct smf_state states[] = {
         ntn_connecting_entry,
         ntn_connecting_run,
         ntn_connecting_exit,
+        NULL,
+        NULL
+    ),
+    [STATE_NTN_CONNECTED] = SMF_CREATE_STATE(
+        ntn_connected_entry, 
+        ntn_connected_run,
+        ntn_connected_exit, 
         NULL,
         NULL
     ),
@@ -235,10 +247,13 @@ static enum smf_state_result ltem_connected_run(void *obj)
         ctx->rsrp_dbm = ctx->ev.meas.rsrp_dbm;
         LOG_INF("Updated LTE RSRP: %d dBm", ctx->rsrp_dbm);
 
+        /*
         if (ctx->rsrp_dbm < -120) {
             struct app_event ev = { .type = EVT_LTE_POOR };
             (void)app_event_put(&ev, K_NO_WAIT);
         }
+        */
+
         return SMF_EVENT_HANDLED;
 
     case EVT_LTE_POOR:
@@ -255,10 +270,12 @@ static enum smf_state_result ltem_connected_run(void *obj)
 
 static void ltem_connected_exit(void *obj)
 {
+    struct app_ctx *ctx = obj;
     int err = rsrp_service_stop();
     if (err) {
         LOG_WRN("Failed to stop LTE signal monitor: %d", err);
     }
+    ctx->lte_connected = false;
 }
 
 static void dispatch_app_event(struct app_ctx *ctx, const struct app_event *ev)
@@ -303,7 +320,7 @@ static enum smf_state_result gnss_acquire_run(void *obj)
         LOG_INF("GNSS_ACQUIRE: gnss timeout");
         (void)gnss_service_stop();
 
-        /* ONLY FOR TESTING */
+        /* ONLY FOR TESTING NTN */
         ctx->last_pvt.latitude = 63.4305;
         ctx->last_pvt.longitude = 10.3951;
         ctx->last_pvt.altitude = 10;
@@ -356,6 +373,12 @@ static enum smf_state_result ntn_connecting_run(void *obj)
         ctx->active_rat = RAT_NTN;
         smf_set_state(SMF_CTX(ctx), &states[STATE_IDLE]);
         return SMF_EVENT_HANDLED;
+    
+    case EVT_PDN_UP:
+        ctx->pdn_up = true;
+        ctx->active_rat = RAT_NTN;
+        smf_set_state(SMF_CTX(ctx), &states[STATE_NTN_CONNECTED]);
+        return SMF_EVENT_HANDLED;
 
     case EVT_REG_FAIL:
         LOG_INF("ntn register failed");
@@ -376,6 +399,40 @@ static enum smf_state_result ntn_connecting_run(void *obj)
 static void ntn_connecting_exit(void *obj)
 {
     ARG_UNUSED(obj);
+}
+
+static void ntn_connected_entry(void *obj)
+{
+    ARG_UNUSED(obj);
+    int err = modem_service_udp_send_test();
+    LOG_INF("UDP test send result: %d", err);
+    LOG_INF("(%s) finished", __func__);
+}
+
+static enum smf_state_result ntn_connected_run(void *obj)
+{
+    struct app_ctx *ctx = obj;
+
+    switch (ctx->ev.type) {
+    case EVT_REG_FAIL:
+    case EVT_NTN_REG_FAIL:
+    case EVT_NTN_TIMEOUT:
+    case EVT_PDN_DOWN:
+        ctx->pdn_up = false;
+        LOG_INF("NTN connection lost/failed");
+        smf_set_state(SMF_CTX(ctx), &states[STATE_IDLE]);
+        return SMF_EVENT_HANDLED;
+
+    default:
+        return SMF_EVENT_HANDLED;
+    }
+}
+
+static void ntn_connected_exit(void *obj)
+{
+    ARG_UNUSED(obj);
+    LOG_INF("ntn connected exit");
+    //k_timer_stop(&ntn_timeout);
 }
 
 static void handle_gnss_status(struct app_ctx *ctx, const struct app_gnss_status *status)
@@ -411,6 +468,8 @@ static void handle_gnss_status(struct app_ctx *ctx, const struct app_gnss_status
     }
 }
 //#endif
+
+
 
 static void backoff_timer_handler(struct k_timer *timer)
 {

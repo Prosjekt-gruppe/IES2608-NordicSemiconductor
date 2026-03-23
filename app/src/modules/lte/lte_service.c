@@ -1,6 +1,9 @@
 /*
- * LTE_Service : LTE-specific behavior on top of the modem
+ * Copyright (c) 2026 Nordic Semiconductor ASA
+ *
+ * SPDX-License-Identifier: LicenseRef-Nordic-5-Clause
  */ 
+
 
 
  #include "lte_service.h"
@@ -15,6 +18,7 @@ LOG_MODULE_REGISTER(lte_service, LOG_LEVEL_INF);
 
 static bool lte_connected; 
 
+/*
 static int publish_evt(enum app_evt_type type)
 {
     struct app_event ev = {
@@ -24,7 +28,7 @@ static int publish_evt(enum app_evt_type type)
     LOG_INF("Publishing %s", app_evt_name(type));
     return app_event_put(&ev, K_NO_WAIT); 
 }
-
+*/
 static void lte_lc_evt_handler(const struct lte_lc_evt *const evt)
 {
     switch (evt->type) {
@@ -37,7 +41,7 @@ static void lte_lc_evt_handler(const struct lte_lc_evt *const evt)
         case LTE_LC_NW_REG_REGISTERED_ROAMING:
             lte_connected=true;
             LOG_INF("LTE registered on network");
-            (void)publish_evt(EVT_REG_OK);
+            (void)app_event_publish_type(EVT_REG_OK);
             break;
 
         case LTE_LC_NW_REG_NOT_REGISTERED:
@@ -46,7 +50,7 @@ static void lte_lc_evt_handler(const struct lte_lc_evt *const evt)
         case LTE_LC_NW_REG_UICC_FAIL:
             lte_connected=false;
             LOG_WRN("LTE registration failed/status=%d", evt->nw_reg_status);
-            (void)publish_evt(EVT_REG_FAIL);
+            (void)app_event_publish_type(EVT_REG_FAIL);
             break;
 
         default:
@@ -90,6 +94,3 @@ bool lte_service_is_connected(void)
 {
     return lte_connected; 
 }
-
-
-
