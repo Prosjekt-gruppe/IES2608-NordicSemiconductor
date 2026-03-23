@@ -1,6 +1,8 @@
 /*
-* RSRP Serivce.c : 
-*/
+ * Copyright (c) 2026 Nordic Semiconductor ASA
+ *
+ * SPDX-License-Identifier: LicenseRef-Nordic-5-Clause
+ */ 
 
 #include "rsrp_service.h"
 #include "app_events.h"
@@ -48,32 +50,38 @@ static int publish_rsrp_event(enum app_evt_type type, int rsrp_dbm)
         .type = type,
     };
 
+    /* add rsrp to event object */
     ev.meas.rsrp_dbm = rsrp_dbm;
 
     return app_event_put(&ev, K_NO_WAIT);
 }
 
+/* consecutive worsening check */
 static bool rsrp_trend_worsening(void)
 {
     int i0;
     int i1;
     int i2;
     int total_drop;
-
+    
+    /* make sure the buffer contain at least three previous measurements */
     if (rsrp_hist_count < 3U) {
         return false;
     }
-
+    
+    /* get the three latest values from the ring buffer */
     i2 = (rsrp_hist_idx + RSRP_HISTORY_LEN - 1) % RSRP_HISTORY_LEN;
     i1 = (rsrp_hist_idx + RSRP_HISTORY_LEN - 2) % RSRP_HISTORY_LEN;
     i0 = (rsrp_hist_idx + RSRP_HISTORY_LEN - 3) % RSRP_HISTORY_LEN;
 
+    /* make sure the trend is actually declining */
     if (!((rsrp_hist[i2] < rsrp_hist[i1]) && (rsrp_hist[i1] < rsrp_hist[i0]))) {
         return false;
     }
 
     total_drop = rsrp_hist[i2] - rsrp_hist[i0];
-
+    
+    /* see if total signal decline reaches a user defined threshold */
     if (total_drop > -CONFIG_APP_MODEM_RSRP_DROP_DB) {
         return false;
     }
@@ -84,12 +92,14 @@ static bool rsrp_trend_worsening(void)
     return true;
 }
 
+/* two step signal worsening check */
 static bool should_publish_lte_poor(int rsrp_dbm)
 {
     bool weak_signal = rsrp_dbm <= CONFIG_APP_MODEM_RSRP_FALLBACK_DBM;
     bool sharp_drop = false;
     bool worsening;
 
+    /* detect sharp decline in signal strength */
     if (last_rsrp_dbm != INT32_MIN) {
         int delta = rsrp_dbm - last_rsrp_dbm;
 
@@ -100,6 +110,7 @@ static bool should_publish_lte_poor(int rsrp_dbm)
         }
     }
 
+    /* add new rsrp measurement to ring buffer */
     rsrp_hist[rsrp_hist_idx] = rsrp_dbm;
     rsrp_hist_idx = (rsrp_hist_idx + 1U) % RSRP_HISTORY_LEN;
     if (rsrp_hist_count < RSRP_HISTORY_LEN) {
@@ -108,7 +119,7 @@ static bool should_publish_lte_poor(int rsrp_dbm)
 
     worsening = rsrp_trend_worsening();
     last_rsrp_dbm = rsrp_dbm;
-
+    
     return weak_signal && (sharp_drop || worsening);
 }
 
@@ -123,6 +134,7 @@ static void rsrp_work_handler(struct k_work *work)
         return;
     }
 
+    /* get rsrp info from modem */
     err = rsrp_service_get(&rsrp_dbm);
     if (err) {
         LOG_WRN("rsrp_service_get failed: %d", err);
@@ -131,9 +143,11 @@ static void rsrp_work_handler(struct k_work *work)
         return;
     }
 
+    /* signal main sm to update ctx-obj with newest rsrp sample */
     LOG_INF("LTE-M RSRP: %d dBm", rsrp_dbm);
     (void)publish_rsrp_event(EVT_RSRP_UPDATE, rsrp_dbm);
 
+    /* signal main sm to exit lte-connected state */
     if (!fallback_requested && should_publish_lte_poor(rsrp_dbm)) {
         fallback_requested = true;
         monitor_enabled = false;
@@ -143,6 +157,7 @@ static void rsrp_work_handler(struct k_work *work)
         return;
     }
 
+    /* reschedule rsrp operation with the given interval */
     (void)k_work_reschedule(&rsrp_work,
                             K_SECONDS(CONFIG_APP_MODEM_SIGNAL_POLL_INTERVAL_SEC));
 }
@@ -157,6 +172,7 @@ int rsrp_service_get(int *rsrp_dbm)
         return -EINVAL;
     }
 
+    /* ask modem for rsrp information */
     err = nrf_modem_at_cmd(buf, sizeof(buf), "AT+CESQ");
     if (err) {
         LOG_ERR("AT+CESQ failed: %d", err);
@@ -185,6 +201,7 @@ int rsrp_service_get(int *rsrp_dbm)
         return 0;
     }
 
+    /* update rsrp dbm variable of rsrp-service */
     *rsrp_dbm = rsrp_raw - 141;
 
     return 0;
@@ -215,7 +232,7 @@ int rsrp_service_init(void){
     reset_signal_tracking();
 
     initialized = true;
-    return 0; 
+    return 0;
 }
 
 int rsrp_service_start(void)
