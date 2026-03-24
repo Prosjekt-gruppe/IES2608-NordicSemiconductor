@@ -461,11 +461,13 @@ static void ntn_connected_entry(void *obj)
     LOG_INF("UDP test send result: %d", err);
 #endif
 
+#if defined(CONFIG_APP_CORE_SM_PROBE_TEST)
     LOG_INF("Starting ntn connected timer");
     int32_t delay_ms = 3000;
     k_timer_start(&ctx->ntn_timer,
                   K_MSEC(delay_ms),
                   K_NO_WAIT);
+#endif
 
     LOG_INF("(%s) finished entering ntn connected", __func__);
 }
@@ -499,7 +501,9 @@ static void ntn_connected_exit(void *obj)
     struct app_ctx *ctx = obj;
 
     LOG_INF("ntn connected exit");
+#if defined(CONFIG_APP_CORE_SM_PROBE_TEST)
     k_timer_stop(&ctx->ntn_timer);
+#endif
 }
 
 static void handle_gnss_status(struct app_ctx *ctx, const struct app_gnss_status *status)
@@ -538,13 +542,32 @@ static void handle_gnss_status(struct app_ctx *ctx, const struct app_gnss_status
     
 static void lte_probe_entry(void *obj)
 {
+    struct app_ctx *ctx = obj;
+
+    ctx->active_rat = RAT_LTEM;
+    ctx->lte_connected = true;
+
+    (void)rsrp_service_sample_and_publish();
+    
     LOG_INF("lte_probe_entry");
 }
 
 static enum smf_state_result lte_probe_run(void *obj)
 {
     LOG_INF("lte_probe_run");
-    return SMF_EVENT_HANDLED;
+    struct app_ctx *ctx = obj;
+
+    switch(ctx->ev.type){
+    case EVT_RSRP_UPDATE:
+        LOG_INF("received rsrp update");
+        return SMF_EVENT_HANDLED;
+        
+    /* TODO: handle transition to ntn or lte based on rsrp */
+
+    default:
+        return SMF_EVENT_HANDLED;
+    }
+
 }
     
     
