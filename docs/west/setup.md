@@ -23,13 +23,13 @@ nrfutil install sdk-manager
 ### Install the Nordic toolchain (NCS)
 
 ```bash
-nrfutil sdk-manager install v3.1.0
+nrfutil sdk-manager install v3.2.4
 ```
 
 ### Launch the toolchain environment
 
 ```bash
-nrfutil sdk-manager toolchain launch --ncs-version v3.1.0 --terminal
+nrfutil sdk-manager toolchain launch --ncs-version v3.2.4 --terminal
 ```
 
 This opens a new terminal with everything configured (west, Python, Zephyr, etc).  
@@ -138,8 +138,8 @@ west update
 
 ```bash
 nrfutil install sdk-manager
-nrfutil sdk-manager install v3.1.0
-nrfutil sdk-manager toolchain launch --ncs-version v3.1.0 --terminal
+nrfutil sdk-manager install v3.2.4
+nrfutil sdk-manager toolchain launch --ncs-version v3.2.4 --terminal
 
 mkdir workspace
 cd workspace
