@@ -22,6 +22,7 @@
 #include "app_types.h"
 #include "app_events.h"
 #include "app_sm.h"
+#include "accel.h"
 
 
 LOG_MODULE_REGISTER(app, LOG_LEVEL_INF);
@@ -44,6 +45,8 @@ int main(void)
 
 
     LOG_INF("Firmware version: %s", APP_VERSION_STRING);
+
+    accel_start();
     
     
     //k_msgq_put(&app_evt_q, &boot, K_NO_WAIT);
