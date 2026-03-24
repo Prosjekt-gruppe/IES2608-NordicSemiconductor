@@ -18,6 +18,7 @@ target_sources(app PRIVATE src/main.c
     src/modules/modem/modem_service.c
     src/modules/ntn/ntn_service.c
     src/modules/rsrp/rsrp_service.c
+    src/modules/sensors/accel.c
 )
 
 
@@ -29,4 +30,5 @@ target_include_directories(app PRIVATE
     src/modules/modem
     src/modules/ntn
     src/modules/rsrp
+    src/modules/sensors
 )
