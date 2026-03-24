@@ -9,6 +9,7 @@
 #include <stdbool.h>
 #include <nrf_modem_gnss.h>
 #include <zephyr/smf.h>
+#include <zephyr/kernel.h>
 
 enum rat {
     RAT_LTEM,
@@ -19,21 +20,22 @@ enum rat {
 enum app_state {
     STATE_BOOT,
     STATE_IDLE,
-    STATE_GNSS_ACQUIRE,
-    STATE_NTN_CONNECTING,
-    STATE_NTN_CONNECTED,
+
     STATE_LTEM_CONNECTING,
     STATE_LTEM_CONNECTED,
+    STATE_LTE_LOCATION,
+    
+    STATE_GNSS_REFINE,
+    
+    STATE_NTN_CONNECTING,
+    STATE_NTN_CONNECTED,
+  
     STATE_BACKOFF,
 };
 
 
 enum app_evt_type {
-    EVT_BOOT,
-    EVT_REG_OK,
-    EVT_REG_FAIL,
-    EVT_GNSS_FIX,
-    EVT_GNSS_TIMEOUT,
+
     EVT_NTN_REG_FAIL,
     EVT_NTN_TIMEOUT,
     EVT_TIMEOUT,
@@ -42,6 +44,37 @@ enum app_evt_type {
     EVT_BACKOFF_TIMEOUT,
     EVT_PDN_UP,
     EVT_PDN_DOWN,
+	/* Boot */
+	EVT_BOOT,
+
+	/* Registration */
+	EVT_REG_OK,
+	EVT_REG_FAIL,
+
+	/* GNSS */
+	EVT_GNSS_FIX,
+	EVT_GNSS_TIMEOUT,
+
+	/* A-GNSS */
+	EVT_AGNSS_REQUEST,
+	EVT_AGNSS_READY,
+	EVT_AGNSS_FAIL,
+
+	/* NTN */
+	EVT_NTN_PREPARE_DONE,
+	EVT_NTN_TIMEOUT,
+
+	/* RSRP */
+	EVT_RSRP_UPDATE,
+	EVT_LTE_POOR,
+
+	/* LTE location */
+	EVT_LTE_LOC_OK,
+	EVT_LTE_LOC_FAIL,
+	EVT_LTE_LOC_TIMEOUT,
+
+	/* Backoff */
+	EVT_BACKOFF_TIMEOUT,
 };
 
 struct app_event {
@@ -54,29 +87,11 @@ struct app_event {
 };
 
 struct app_ctx {
-    struct smf_ctx ctx;
-    
-    /* rat overview */
-    enum rat active_rat;
-    enum rat next_rat;
-    
-    
-    /* ltem signal strength*/
-    int rsrp_dbm;
-    int backoff_ms;
-    
-    /* gnss */
-    bool have_fix;
-    struct nrf_modem_gnss_pvt_data_frame last_pvt;
-    
-    /* ntn */
-    bool ntn_initialized;
-    
-    /* events */
-    struct app_event ev;
+	struct smf_ctx ctx;
 
-    /* lte */
-   	bool lte_connected;
+	/* RAT overview */
+	enum rat active_rat;
+	enum rat next_rat;
 
     /* timers */
     struct k_timer backoff_timer;
@@ -84,7 +99,33 @@ struct app_ctx {
     /* pdn */
     bool pdn_up;
     
+	/* LTE / signal */
+	bool lte_connected;
+	int rsrp_dbm;
+	int backoff_ms;
+
+	/* LTE location */
+	bool lte_loc_requested;
+	bool lte_fix;
+	struct nrf_modem_gnss_pvt_data_frame lte_pvt;
+
+	/* GNSS refine */
+	bool agnss_requested;
+	bool gnss_fix;
+	struct nrf_modem_gnss_pvt_data_frame gnss_pvt;
+
+	/* NTN / final selected position */
+	bool ntn_initialized;
+	bool final_fix;
+	struct nrf_modem_gnss_pvt_data_frame final_pvt;
+
+	/* Current event */
+	struct app_event ev;
+
+	/* Timers */
+	struct k_timer backoff_timer;
 };
+
 
 /*
 struct monitor_event {
