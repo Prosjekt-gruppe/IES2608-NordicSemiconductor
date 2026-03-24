@@ -24,6 +24,7 @@ enum app_state {
     STATE_NTN_CONNECTED,
     STATE_LTEM_CONNECTING,
     STATE_LTEM_CONNECTED,
+    STATE_LTE_PROBE,
     STATE_BACKOFF,
 };
 
@@ -80,6 +81,8 @@ struct app_ctx {
 
     /* timers */
     struct k_timer backoff_timer;
+    struct k_timer ntn_timer;
+    struct k_timer lte_timer;
 
     /* pdn */
     bool pdn_up;

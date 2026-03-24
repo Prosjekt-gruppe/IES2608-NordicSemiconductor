@@ -39,4 +39,15 @@ config APP_MODEM_RSRP_DROP_DB
       Minimum drop in dB used by the modem service when deciding that the
       LTE-M signal is degrading toward an NTN fallback.
 
+config APP_CORE_SEND_UDP_DATA
+    bool "Send UDP data over NTN"
+    help
+      Enable UDP sending in the NTN module.
+
+config APP_CORE_SM_PROBE_TEST
+    bool "Start dry run for LTE-PROBE"
+    help
+      Enable LTE-Probe dry run.
+
+
 endmenu
