@@ -5,9 +5,11 @@
  */ 
 
 #pragma once
+#include <stdint.h>
 
-int rsrp_service_get(int *rsrp_dbm); 
+int rsrp_service_get(int *rsrp_dbm);
 int rsrp_service_sample_and_publish(void); 
-int rsrp_service_start(void);
+int rsrp_service_start_monitor(void);
 int rsrp_service_stop(void);
 int rsrp_service_init(void);
+int rsrp_service_start_probe(uint8_t samples);

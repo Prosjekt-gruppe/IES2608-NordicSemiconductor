@@ -259,7 +259,7 @@ static void ltem_connected_entry(void *obj)
         LOG_WRN("Could not read LTE RSRP: %d", err);
     }
     
-    err = rsrp_service_start();
+    err = rsrp_service_start_monitor();
     if (err < 0) {
         LOG_WRN("Failed to start LTE signal monitor: %d", err);
     }
@@ -637,7 +637,7 @@ static void backoff_exit(void *obj)
     k_timer_stop(&ctx->backoff_timer);
 }
 
-
+/* main smf thread setup */
 #define SMF_STACK_SIZE 2048
 #define SMF_PRIORITY 5
 
