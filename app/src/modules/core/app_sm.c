@@ -173,7 +173,6 @@ static enum smf_state_result boot_run(void *obj)
     {
         smf_set_state(SMF_CTX(ctx), &states[STATE_LTEM_CONNECTING]);
     }
-    return SMF_EVENT_HANDLED;
 }
 return SMF_EVENT_HANDLED;
 }
