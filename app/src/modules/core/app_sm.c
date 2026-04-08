@@ -165,12 +165,16 @@ static void boot_entry(void *obj)
 static enum smf_state_result boot_run(void *obj)
 {
     struct app_ctx *ctx = obj;
-
+    
     if (ctx->ev.type == EVT_BOOT) {
+        if (IS_ENABLED(CONFIG_APP_DEBUG_BOOT)){
+            LOG_INF("DEBUG: Halting in STATE_BOOT after initialization");  
+    } else 
+    {
         smf_set_state(SMF_CTX(ctx), &states[STATE_LTEM_CONNECTING]);
     }
-
-    return SMF_EVENT_HANDLED;
+}
+return SMF_EVENT_HANDLED;
 }
 
 static void ltem_connecting_entry(void *obj)
@@ -196,7 +200,14 @@ static enum smf_state_result ltem_connecting_run(void *obj)
 
         case EVT_REG_OK:
             ctx->active_rat = RAT_LTEM;
-            smf_set_state(SMF_CTX(ctx), &states[STATE_LTEM_CONNECTED]);
+
+            if (IS_ENABLED(CONFIG_APP_DEBUG_LTE_CONNECTING)){
+                LOG_INF("Debug_ Halting after LTE registration");
+                smf_set_state(SMF_CTX(ctx), &states[STATE_IDLE]);
+            } else {
+                smf_set_state(SMF_CTX(ctx), &states[STATE_LTEM_CONNECTED]);
+            }
+
             return SMF_EVENT_HANDLED;
 
         case EVT_REG_FAIL:
