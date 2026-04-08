@@ -59,3 +59,28 @@ config APP_CORE_SM_PROBE_TEST
 
 
 endmenu
+
+
+menu "APP Debug Options"
+
+config APP_DEBUG
+  bool "Enable debug features"
+  default n
+
+config APP_DEBUG_BOOT
+  bool "Halt in boot state after initalization"
+  depends on APP_DEBUG
+  default n
+  help 
+    Run boot_entry(), but do not transistion out of STATE_BOOT
+    when EVT_BOOT is received 
+
+config APP_DEBUG_LTE_CONNECTING
+  bool "Halt after LTE registration"
+  depends on APP_DEBUG
+  default n
+  help 
+    Allow LTE attach to complete, then stop before transistioning
+    STATE_LTEM_CONNECTED
+
+endmenu
