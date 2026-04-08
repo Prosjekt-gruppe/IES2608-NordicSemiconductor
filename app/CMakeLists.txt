@@ -32,3 +32,7 @@ target_include_directories(app PRIVATE
     src/modules/rsrp
     src/modules/sensors
 )
+
+target_sources(app PRIVATE
+    src/modules/sensors/batt.c
+)
