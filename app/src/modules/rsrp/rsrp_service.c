@@ -7,6 +7,7 @@
 #include "rsrp_service.h"
 #include "app_events.h"
 
+
 #include <errno.h>
 #include <nrf_modem_at.h>
 #include <stdio.h>
@@ -14,18 +15,37 @@
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
 
+#ifndef CONFIG_APP_MODEM_SIGNAL_POLL_INTERVAL_STILL_SEC
+#define CONFIG_APP_MODEM_SIGNAL_POLL_INTERVAL_STILL_SEC \
+	CONFIG_APP_MODEM_SIGNAL_POLL_INTERVAL_SEC
+#endif
+
+#ifndef CONFIG_APP_MODEM_RSRP_RECOVERY_DBM
+#define CONFIG_APP_MODEM_RSRP_RECOVERY_DBM \
+	CONFIG_APP_MODEM_RSRP_FALLBACK_DBM
+#endif
 
 LOG_MODULE_REGISTER(rsrp_service, LOG_LEVEL_INF); 
 
 
 /*----- Defines ---------*/
 #define RSRP_HISTORY_LEN 6
+#define PROBE_POLL_MSEC 500
+
+/* service internal state control */
+enum rsrp_mode {
+    RSRP_MODE_IDLE,
+    RSRP_MODE_MONITOR,
+    RSRP_MODE_PROBE,
+};
+
+static enum rsrp_mode mode;
+static uint8_t probe_target;
 
 
 /*------ Variables -------*/
 static struct k_work_delayable rsrp_work;
 static bool initialized;
-static bool monitor_enabled;
 static bool fallback_requested;
 static bool motion_hint_valid;
 static bool motion_hint_moving;
@@ -40,7 +60,6 @@ static uint8_t rsrp_hist_count;
 
 
 /*---- Functions -------*/
-
 static void reset_signal_tracking(void)
 {
     last_rsrp_dbm = INT32_MIN;
@@ -141,6 +160,7 @@ static bool should_publish_lte_poor(int rsrp_dbm)
     return weak_signal && (sharp_drop || worsening);
 }
 
+
 static void rsrp_work_handler(struct k_work *work)
 {
     int err;
@@ -148,39 +168,91 @@ static void rsrp_work_handler(struct k_work *work)
 
     ARG_UNUSED(work);
 
-    if (!monitor_enabled) {
-        return;
-    }
+    switch (mode) {
+    case RSRP_MODE_MONITOR:
+        /* get rsrp info from modem */
+        err = rsrp_service_get(&rsrp_dbm);
+        if (err) {
+            LOG_WRN("rsrp_service_get failed: %d", err);
+            current_poll_interval_sec = rsrp_target_poll_interval_sec();
+            (void)k_work_reschedule(&rsrp_work,
+                                    K_SECONDS(current_poll_interval_sec));
+            return;
+        }
+    
+        /* signal main sm to update ctx-obj with newest rsrp sample */
+        LOG_INF("LTE-M RSRP: %d dBm", rsrp_dbm);
+        (void)publish_rsrp_event(EVT_RSRP_UPDATE, rsrp_dbm);
 
-    /* get rsrp info from modem */
-    err = rsrp_service_get(&rsrp_dbm);
-    if (err) {
-        LOG_WRN("rsrp_service_get failed: %d", err);
+        /* signal main sm to exit lte-connected state */
+        if (!fallback_requested && should_publish_lte_poor(rsrp_dbm)) {
+            fallback_requested = true;
+            mode = RSRP_MODE_IDLE;
+
+            LOG_WRN("LTE-M signal degradation detected, publishing LTE poor event");
+            (void)publish_rsrp_event(EVT_LTE_POOR, rsrp_dbm);
+            return;
+        }
+
+        /* reschedule rsrp operation with the given interval */
         current_poll_interval_sec = rsrp_target_poll_interval_sec();
         (void)k_work_reschedule(&rsrp_work,
                                 K_SECONDS(current_poll_interval_sec));
         return;
-    }
 
-    /* signal main sm to update ctx-obj with newest rsrp sample */
-    LOG_INF("LTE-M RSRP: %d dBm", rsrp_dbm);
-    (void)publish_rsrp_event(EVT_RSRP_UPDATE, rsrp_dbm);
 
-    /* signal main sm to exit lte-connected state */
-    if (!fallback_requested && should_publish_lte_poor(rsrp_dbm)) {
-        fallback_requested = true;
-        monitor_enabled = false;
+    /* a bit patchy but it should be ok for now */
+    case RSRP_MODE_PROBE:
+    
+        err = rsrp_service_get(&rsrp_dbm);
+        if (err) {
+            LOG_WRN("rsrp_service_get failed during probe: %d", err);
+            (void)k_work_reschedule(&rsrp_work, K_MSEC(PROBE_POLL_MSEC));
+            return;
+        }
+    
+        /* store sample in ring buffer */
+        rsrp_hist[rsrp_hist_idx] = rsrp_dbm;
+        rsrp_hist_idx = (rsrp_hist_idx + 1U) % RSRP_HISTORY_LEN;
+        if (rsrp_hist_count < RSRP_HISTORY_LEN) {
+            rsrp_hist_count++;
+        }
+    
+        if (rsrp_hist_count < probe_target) {
+            //TODO: implement it into Kconfig 
+            k_work_reschedule(&rsrp_work, K_MSEC(PROBE_POLL_MSEC));
+            return;
+        }
 
-        LOG_WRN("LTE-M signal degradation detected, publishing LTE poor event");
-        (void)publish_rsrp_event(EVT_LTE_POOR, rsrp_dbm);
+        /* 
+         * TODO: make this more robust
+         */
+
+        int sum = 0;
+        for (int i = 0; i < rsrp_hist_count; i++) {
+            sum += rsrp_hist[i];
+        }
+
+        int avg = sum / rsrp_hist_count;
+
+        if (avg >= CONFIG_APP_MODEM_RSRP_RECOVERY_DBM) {
+            publish_rsrp_event(EVT_LTE_GOOD, avg);
+        } else {
+            publish_rsrp_event(EVT_LTE_POOR, avg);
+        }
+
+        LOG_INF("LTE probe complete: avg=%d dBm over %u samples", avg, probe_target);
+        mode = RSRP_MODE_IDLE;
+
         return;
-    }
 
-    /* reschedule rsrp operation with the given interval */
-    current_poll_interval_sec = rsrp_target_poll_interval_sec();
-    (void)k_work_reschedule(&rsrp_work,
-                            K_SECONDS(current_poll_interval_sec));
+    case RSRP_MODE_IDLE:
+    default:
+        return;
+
+    }
 }
+
 
 int rsrp_service_get(int *rsrp_dbm)
 {
@@ -248,6 +320,8 @@ int rsrp_service_init(void){
         return 0;
     }
 
+    mode = RSRP_MODE_IDLE;
+
     k_work_init_delayable(&rsrp_work, rsrp_work_handler);
     reset_signal_tracking();
     current_poll_interval_sec = rsrp_target_poll_interval_sec();
@@ -256,13 +330,13 @@ int rsrp_service_init(void){
     return 0;
 }
 
-int rsrp_service_start(void)
+int rsrp_service_start_monitor(void)
 {
     if (!initialized) {
         return -EINVAL;
     }
 
-    monitor_enabled = true;
+    mode = RSRP_MODE_MONITOR;
     reset_signal_tracking();
     current_poll_interval_sec = rsrp_target_poll_interval_sec();
 
@@ -270,9 +344,27 @@ int rsrp_service_start(void)
         K_SECONDS(current_poll_interval_sec));
 }
 
+/* start gathering of lte-probe samples */
+int rsrp_service_start_probe(uint8_t samples)
+{
+    if (!initialized) {
+        return -EINVAL;
+    }
+    
+    
+    reset_signal_tracking();
+    
+    
+    mode = RSRP_MODE_PROBE;
+    probe_target = samples;
+    
+    return k_work_reschedule(&rsrp_work, K_NO_WAIT);
+}
+
+
 int rsrp_service_stop(void)
 {
-    monitor_enabled = false;
+    mode = RSRP_MODE_IDLE;
     reset_signal_tracking();
     return k_work_cancel_delayable(&rsrp_work);
 }
@@ -304,7 +396,7 @@ void rsrp_service_set_motion_hint(bool moving, uint32_t speed_mm_s,
             motion_speed_mm_s,
             motion_linear_accel_mg);
 
-    if (initialized && monitor_enabled) {
+    if (initialized && (mode == RSRP_MODE_MONITOR)) {
         (void)k_work_reschedule(&rsrp_work, K_SECONDS(current_poll_interval_sec));
     }
 }
