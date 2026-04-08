@@ -8,12 +8,10 @@
 #include "app_zbus.h"
 #include "rsrp_service.h"
 
-
 #include "gnss_service.h"
 #include "ntn_service.h"
 #include "modem_service.h"
 #include "lte_service.h"
-
 
 #include <modem/nrf_modem_lib.h>
 #include <zephyr/kernel.h>
@@ -23,9 +21,10 @@
 
 LOG_MODULE_REGISTER(app_sm, LOG_LEVEL_INF);
 
-ZBUS_MSG_SUBSCRIBER_DEFINE(app_fsm_sub); //Subscriber for app events and GNSS status updates
+ZBUS_MSG_SUBSCRIBER_DEFINE(app_fsm_sub); // Subscriber for app events and GNSS status updates
 
-union app_sm_msg {
+union app_sm_msg
+{
     struct app_event app_event;
     struct app_gnss_status gnss_status;
 };
@@ -33,17 +32,15 @@ union app_sm_msg {
 static void boot_entry(void *obj);
 static enum smf_state_result boot_run(void *obj);
 
-static void ltem_connecting_entry(void *obj); 
+static void ltem_connecting_entry(void *obj);
 static enum smf_state_result ltem_connecting_run(void *obj);
 
-static void ltem_connected_entry(void *obj); 
+static void ltem_connected_entry(void *obj);
 static enum smf_state_result ltem_connected_run(void *obj);
-static void ltem_connected_exit(void *obj); 
+static void ltem_connected_exit(void *obj);
 
 static void backoff_entry(void *obj);
 static enum smf_state_result backoff_run(void *obj);
-
-
 
 static void gnss_acquire_entry(void *obj);
 static enum smf_state_result gnss_acquire_run(void *obj);
@@ -57,9 +54,7 @@ static void ntn_connected_entry(void *obj);
 static enum smf_state_result ntn_connected_run(void *obj);
 static void ntn_connected_exit(void *obj);
 
-
 static void handle_gnss_status(struct app_ctx *ctx, const struct app_gnss_status *status);
-
 
 static void dispatch_app_event(struct app_ctx *ctx, const struct app_event *ev);
 static void backoff_timer_handler(struct k_timer *timer);
@@ -70,81 +65,75 @@ static const struct smf_state states[] = {
         boot_run,
         NULL,
         NULL,
-        NULL
-    ),
+        NULL),
     [STATE_LTEM_CONNECTING] = SMF_CREATE_STATE(
-        ltem_connecting_entry, 
-        ltem_connecting_run, 
+        ltem_connecting_entry,
+        ltem_connecting_run,
         NULL,
         NULL,
-        NULL
-    ),
+        NULL),
     [STATE_LTEM_CONNECTED] = SMF_CREATE_STATE(
         ltem_connected_entry,
         ltem_connected_run,
         ltem_connected_exit,
         NULL,
-        NULL
-    ),
+        NULL),
 
-    
     [STATE_GNSS_ACQUIRE] = SMF_CREATE_STATE(
         gnss_acquire_entry,
         gnss_acquire_run,
         gnss_acquire_exit,
         NULL,
-        NULL
-    ),
+        NULL),
     [STATE_NTN_CONNECTING] = SMF_CREATE_STATE(
         ntn_connecting_entry,
         ntn_connecting_run,
         ntn_connecting_exit,
         NULL,
-        NULL
-    ),
+        NULL),
     [STATE_NTN_CONNECTED] = SMF_CREATE_STATE(
-        ntn_connected_entry, 
+        ntn_connected_entry,
         ntn_connected_run,
-        ntn_connected_exit, 
+        ntn_connected_exit,
         NULL,
-        NULL
-    ),
+        NULL),
     [STATE_IDLE] = SMF_CREATE_STATE(
         NULL,
         NULL,
         NULL,
         NULL,
-        NULL
-    ),
+        NULL),
     [STATE_BACKOFF] = SMF_CREATE_STATE(
         backoff_entry,
         backoff_run,
         NULL,
         NULL,
-        NULL
-    ),
+        NULL),
 };
 
 static void boot_entry(void *obj)
 {
     struct app_ctx *ctx = obj;
 
-    int err = modem_service_init(); 
-    if  (err){
+    int err = modem_service_init();
+    if (err)
+    {
         LOG_ERR("modem_service_init err=%d", err);
         return;
     }
 
     err = lte_service_init();
-    if (err){
-        LOG_ERR("lte_service_init err=%d", err); 
-        return; 
+    if (err)
+    {
+        LOG_ERR("lte_service_init err=%d", err);
+        return;
     }
 
     err = rsrp_service_init();
-    if (err){
-        LOG_ERR("rsrp_service_init err=%d", err); 
-        return; 
+    if (err)
+    {
+        LOG_ERR("rsrp_service_init err=%d", err);
+        return;
     }
 
     /*
@@ -157,17 +146,27 @@ static void boot_entry(void *obj)
 
     /* init timers */
     k_timer_init(&ctx->backoff_timer, backoff_timer_handler, NULL);
-    
-    
-    LOG_INF("BOOT complete");
+
+    LOG_INF("BOOT entry complete");
 }
 
 static enum smf_state_result boot_run(void *obj)
 {
     struct app_ctx *ctx = obj;
 
-    if (ctx->ev.type == EVT_BOOT) {
-        smf_set_state(SMF_CTX(ctx), &states[STATE_LTEM_CONNECTING]);
+    if (ctx->ev.type == EVT_BOOT)
+    {
+
+        if (IS_ENABLED(CONFIG_APP_DEBUG_BOOT))
+        {
+            LOG_INF("DEBUG: Halting in STATE_BOOT after initialization");
+        }
+        else
+        {
+            LOG_INF("Transition: STATE_BOOT --> STATE_LTEM_CONNECTING"); 
+            smf_set_state(SMF_CTX(ctx), &states[STATE_LTEM_CONNECTING]);
+        }
+        return SMF_EVENT_HANDLED;
     }
 
     return SMF_EVENT_HANDLED;
@@ -178,9 +177,10 @@ static void ltem_connecting_entry(void *obj)
     ARG_UNUSED(obj);
 
     int err = lte_service_connect_async();
-    if (err){
-        LOG_ERR("lte_service_connect_async err=%d", err); 
-        struct app_event ev = { .type = EVT_REG_FAIL};
+    if (err)
+    {
+        LOG_ERR("lte_service_connect_async err=%d", err);
+        struct app_event ev = {.type = EVT_REG_FAIL};
         (void)app_event_put(&ev, K_NO_WAIT);
         return;
     }
@@ -192,24 +192,34 @@ static enum smf_state_result ltem_connecting_run(void *obj)
 {
     struct app_ctx *ctx = obj;
 
-    switch (ctx->ev.type){
+    switch (ctx->ev.type)
+    {
 
-        case EVT_REG_OK:
-            ctx->active_rat = RAT_LTEM;
+    case EVT_REG_OK:
+        ctx->active_rat = RAT_LTEM;
+
+        if (IS_ENABLED(CONFIG_APP_DEBUG_LTE_CONNECTING))
+        {
+            LOG_INF("DEBUG: Halting after LTE registration");
+            smf_set_state(SMF_CTX(ctx), &states[STATE_IDLE]);
+        }
+        else
+        {
             smf_set_state(SMF_CTX(ctx), &states[STATE_LTEM_CONNECTED]);
-            return SMF_EVENT_HANDLED;
+        }
 
-        case EVT_REG_FAIL:
-            ctx->next_rat = RAT_NTN;
-            /* go to backoff state */
-            smf_set_state(SMF_CTX(ctx), &states[STATE_BACKOFF]);
-            return SMF_EVENT_HANDLED;
+        return SMF_EVENT_HANDLED;
 
-        default:
-            return SMF_EVENT_HANDLED;
+    case EVT_REG_FAIL:
+        ctx->next_rat = RAT_NTN;
+        /* go to backoff state */
+        smf_set_state(SMF_CTX(ctx), &states[STATE_BACKOFF]);
+        return SMF_EVENT_HANDLED;
+
+    default:
+        return SMF_EVENT_HANDLED;
     }
 }
-
 
 static void ltem_connected_entry(void *obj)
 {
@@ -219,30 +229,33 @@ static void ltem_connected_entry(void *obj)
 
     ctx->active_rat = RAT_LTEM;
     ctx->lte_connected = true;
-    
 
     err = rsrp_service_get(&rsrp_dbm);
-    if (!err) {
+    if (!err)
+    {
         ctx->rsrp_dbm = rsrp_dbm;
         LOG_INF("LTE RSRP on entry: %d dBm", rsrp_dbm);
-    } else {
+    }
+    else
+    {
         LOG_WRN("Could not read LTE RSRP: %d", err);
     }
-    
+
     err = rsrp_service_start();
-    if (err < 0) {
+    if (err < 0)
+    {
         LOG_WRN("Failed to start LTE signal monitor: %d", err);
     }
 
     LOG_INF("ltem_connected_entry ok");
-
 }
 
 static enum smf_state_result ltem_connected_run(void *obj)
 {
     struct app_ctx *ctx = obj;
 
-    switch (ctx->ev.type) {
+    switch (ctx->ev.type)
+    {
     case EVT_RSRP_UPDATE:
         ctx->rsrp_dbm = ctx->ev.meas.rsrp_dbm;
         LOG_INF("Updated LTE RSRP: %d dBm", ctx->rsrp_dbm);
@@ -272,7 +285,8 @@ static void ltem_connected_exit(void *obj)
 {
     struct app_ctx *ctx = obj;
     int err = rsrp_service_stop();
-    if (err) {
+    if (err)
+    {
         LOG_WRN("Failed to stop LTE signal monitor: %d", err);
     }
     ctx->lte_connected = false;
@@ -285,8 +299,7 @@ static void dispatch_app_event(struct app_ctx *ctx, const struct app_event *ev)
     (void)smf_run_state(SMF_CTX(ctx));
 }
 
-
-//#if 0
+// #if 0
 static void gnss_acquire_entry(void *obj)
 {
     ARG_UNUSED(obj);
@@ -303,7 +316,8 @@ static enum smf_state_result gnss_acquire_run(void *obj)
 
     LOG_INF("entering (%s)", __func__);
 
-    switch (ctx->ev.type) {
+    switch (ctx->ev.type)
+    {
     case EVT_GNSS_FIX:
         ctx->last_pvt = ctx->ev.pvt;
         ctx->have_fix = true;
@@ -352,9 +366,10 @@ static void ntn_connecting_entry(void *obj)
 
     int err = ntn_service_connect(ctx);
 
-    if (err) {
+    if (err)
+    {
         LOG_INF("ntn initialization failed (%d)", err);
-        struct app_event ev = { .type = EVT_REG_FAIL };
+        struct app_event ev = {.type = EVT_REG_FAIL};
         (void)app_event_put(&ev, K_NO_WAIT);
         return;
     }
@@ -366,14 +381,15 @@ static enum smf_state_result ntn_connecting_run(void *obj)
 {
     struct app_ctx *ctx = obj;
 
-    switch (ctx->ev.type) {
+    switch (ctx->ev.type)
+    {
     case EVT_REG_OK:
         LOG_INF("ntn registered ok");
-        
+
         ctx->active_rat = RAT_NTN;
         smf_set_state(SMF_CTX(ctx), &states[STATE_IDLE]);
         return SMF_EVENT_HANDLED;
-    
+
     case EVT_PDN_UP:
         ctx->pdn_up = true;
         ctx->active_rat = RAT_NTN;
@@ -385,7 +401,7 @@ static enum smf_state_result ntn_connecting_run(void *obj)
         smf_set_state(SMF_CTX(ctx), &states[STATE_BACKOFF]);
         return SMF_EVENT_HANDLED;
 
-    //case EVT_NTN_REG_FAIL:
+    // case EVT_NTN_REG_FAIL:
     case EVT_NTN_TIMEOUT:
         LOG_INF("ntn connect failed/timeout");
         smf_set_state(SMF_CTX(ctx), &states[STATE_BACKOFF]);
@@ -413,7 +429,8 @@ static enum smf_state_result ntn_connected_run(void *obj)
 {
     struct app_ctx *ctx = obj;
 
-    switch (ctx->ev.type) {
+    switch (ctx->ev.type)
+    {
     case EVT_REG_FAIL:
     case EVT_NTN_REG_FAIL:
     case EVT_NTN_TIMEOUT:
@@ -432,14 +449,15 @@ static void ntn_connected_exit(void *obj)
 {
     ARG_UNUSED(obj);
     LOG_INF("ntn connected exit");
-    //k_timer_stop(&ntn_timeout);
+    // k_timer_stop(&ntn_timeout);
 }
 
 static void handle_gnss_status(struct app_ctx *ctx, const struct app_gnss_status *status)
 {
     struct app_event ev = {0};
 
-    switch (status->state) {
+    switch (status->state)
+    {
     case APP_GNSS_STATE_FIX:
         ev.type = EVT_GNSS_FIX;
         ev.pvt.latitude = status->latitude;
@@ -467,17 +485,14 @@ static void handle_gnss_status(struct app_ctx *ctx, const struct app_gnss_status
         return;
     }
 }
-//#endif
-
-
+// #endif
 
 static void backoff_timer_handler(struct k_timer *timer)
 {
     ARG_UNUSED(timer);
 
     struct app_event ev = {
-        .type = EVT_BACKOFF_TIMEOUT
-    };
+        .type = EVT_BACKOFF_TIMEOUT};
 
     (void)app_event_put(&ev, K_NO_WAIT);
 }
@@ -505,9 +520,11 @@ static enum smf_state_result backoff_run(void *obj)
 {
     struct app_ctx *ctx = obj;
 
-    switch (ctx->ev.type) {
+    switch (ctx->ev.type)
+    {
     case EVT_BACKOFF_TIMEOUT:
-        if (ctx->next_rat != RAT_NTN) {
+        if (ctx->next_rat != RAT_NTN)
+        {
             LOG_INF("Retry LTE connect");
             smf_set_state(SMF_CTX(ctx), &states[STATE_LTEM_CONNECTING]);
             return SMF_EVENT_HANDLED;
@@ -515,7 +532,8 @@ static enum smf_state_result backoff_run(void *obj)
 
         LOG_INF("Trying to connect NTN");
 
-        if (!ctx->have_fix) {
+        if (!ctx->have_fix)
+        {
             LOG_INF("No GNSS fix -> trying to acquire fix");
             smf_set_state(SMF_CTX(ctx), &states[STATE_GNSS_ACQUIRE]);
             return SMF_EVENT_HANDLED;
@@ -529,7 +547,6 @@ static enum smf_state_result backoff_run(void *obj)
     }
 }
 
-
 #define SMF_STACK_SIZE 2048
 #define SMF_PRIORITY 5
 
@@ -539,7 +556,7 @@ static struct k_thread smf_thread_data;
 
 static void smf_thread(void *p1, void *p2, void *p3)
 {
-    //void app_sm_post_dispatch(struct app_ctx *ctx, const struct app_event *ev);
+    // void app_sm_post_dispatch(struct app_ctx *ctx, const struct app_event *ev);
 
     ARG_UNUSED(p2);
     ARG_UNUSED(p3);
@@ -547,19 +564,22 @@ static void smf_thread(void *p1, void *p2, void *p3)
 
     smf_set_initial(SMF_CTX(ctx), &states[STATE_BOOT]);
 
-    while (1) {
+    while (1)
+    {
         const struct zbus_channel *chan;
         union app_sm_msg msg = {0};
         int err = zbus_sub_wait_msg(&app_fsm_sub, &chan, &msg, K_FOREVER);
 
-        if (err) {
+        if (err)
+        {
             LOG_WRN("zbus_sub_wait_msg failed, err=%d", err);
             continue;
         }
 
-        if (chan == &app_evt_chan) {
+        if (chan == &app_evt_chan)
+        {
             dispatch_app_event(ctx, &msg.app_event);
-            //app_sm_post_dispatch(ctx, &msg.app_event);
+            // app_sm_post_dispatch(ctx, &msg.app_event);
             continue;
         }
 
@@ -581,7 +601,6 @@ int app_sm_start(struct app_ctx *ctx)
                     SMF_PRIORITY, 0, K_NO_WAIT);
     return 0;
 }
-
 
 /*
 void app_sm_post_dispatch(struct app_ctx *ctx, const struct app_event *ev)
