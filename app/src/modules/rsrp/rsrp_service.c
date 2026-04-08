@@ -15,6 +15,15 @@
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
 
+#ifndef CONFIG_APP_MODEM_SIGNAL_POLL_INTERVAL_STILL_SEC
+#define CONFIG_APP_MODEM_SIGNAL_POLL_INTERVAL_STILL_SEC \
+	CONFIG_APP_MODEM_SIGNAL_POLL_INTERVAL_SEC
+#endif
+
+#ifndef CONFIG_APP_MODEM_RSRP_RECOVERY_DBM
+#define CONFIG_APP_MODEM_RSRP_RECOVERY_DBM \
+	CONFIG_APP_MODEM_RSRP_FALLBACK_DBM
+#endif
 
 LOG_MODULE_REGISTER(rsrp_service, LOG_LEVEL_INF); 
 
@@ -37,9 +46,13 @@ static uint8_t probe_target;
 /*------ Variables -------*/
 static struct k_work_delayable rsrp_work;
 static bool initialized;
-static bool monitor_enabled;
 static bool fallback_requested;
+static bool motion_hint_valid;
+static bool motion_hint_moving;
 static int last_rsrp_dbm = INT32_MIN;
+static uint32_t motion_speed_mm_s;
+static uint32_t motion_linear_accel_mg;
+static uint32_t current_poll_interval_sec = CONFIG_APP_MODEM_SIGNAL_POLL_INTERVAL_SEC;
 
 static int rsrp_hist[RSRP_HISTORY_LEN];
 static uint8_t rsrp_hist_idx;
@@ -65,6 +78,19 @@ static int publish_rsrp_event(enum app_evt_type type, int rsrp_dbm)
     ev.meas.rsrp_dbm = rsrp_dbm;
 
     return app_event_put(&ev, K_NO_WAIT);
+}
+
+static uint32_t rsrp_target_poll_interval_sec(void)
+{
+    if (!motion_hint_valid) {
+        return CONFIG_APP_MODEM_SIGNAL_POLL_INTERVAL_STILL_SEC;
+    }
+
+    if (motion_hint_moving) {
+        return CONFIG_APP_MODEM_SIGNAL_POLL_INTERVAL_SEC;
+    }
+
+    return CONFIG_APP_MODEM_SIGNAL_POLL_INTERVAL_STILL_SEC;
 }
 
 /* consecutive worsening check */
@@ -142,22 +168,15 @@ static void rsrp_work_handler(struct k_work *work)
 
     ARG_UNUSED(work);
 
-
-    /*
-    if (!monitor_enabled) {
-        return;
-    }
-    */
-
-
     switch (mode) {
     case RSRP_MODE_MONITOR:
         /* get rsrp info from modem */
         err = rsrp_service_get(&rsrp_dbm);
         if (err) {
             LOG_WRN("rsrp_service_get failed: %d", err);
+            current_poll_interval_sec = rsrp_target_poll_interval_sec();
             (void)k_work_reschedule(&rsrp_work,
-                                    K_SECONDS(CONFIG_APP_MODEM_SIGNAL_POLL_INTERVAL_SEC));
+                                    K_SECONDS(current_poll_interval_sec));
             return;
         }
     
@@ -168,7 +187,7 @@ static void rsrp_work_handler(struct k_work *work)
         /* signal main sm to exit lte-connected state */
         if (!fallback_requested && should_publish_lte_poor(rsrp_dbm)) {
             fallback_requested = true;
-            monitor_enabled = false;
+            mode = RSRP_MODE_IDLE;
 
             LOG_WRN("LTE-M signal degradation detected, publishing LTE poor event");
             (void)publish_rsrp_event(EVT_LTE_POOR, rsrp_dbm);
@@ -176,9 +195,9 @@ static void rsrp_work_handler(struct k_work *work)
         }
 
         /* reschedule rsrp operation with the given interval */
+        current_poll_interval_sec = rsrp_target_poll_interval_sec();
         (void)k_work_reschedule(&rsrp_work,
-                                K_SECONDS(CONFIG_APP_MODEM_SIGNAL_POLL_INTERVAL_SEC));
-                  
+                                K_SECONDS(current_poll_interval_sec));
         return;
 
 
@@ -232,7 +251,6 @@ static void rsrp_work_handler(struct k_work *work)
         return;
 
     }
-
 }
 
 
@@ -306,6 +324,7 @@ int rsrp_service_init(void){
 
     k_work_init_delayable(&rsrp_work, rsrp_work_handler);
     reset_signal_tracking();
+    current_poll_interval_sec = rsrp_target_poll_interval_sec();
 
     initialized = true;
     return 0;
@@ -319,9 +338,10 @@ int rsrp_service_start_monitor(void)
 
     mode = RSRP_MODE_MONITOR;
     reset_signal_tracking();
+    current_poll_interval_sec = rsrp_target_poll_interval_sec();
 
     return k_work_reschedule(&rsrp_work,
-        K_SECONDS(CONFIG_APP_MODEM_SIGNAL_POLL_INTERVAL_SEC));
+        K_SECONDS(current_poll_interval_sec));
 }
 
 /* start gathering of lte-probe samples */
@@ -347,4 +367,36 @@ int rsrp_service_stop(void)
     mode = RSRP_MODE_IDLE;
     reset_signal_tracking();
     return k_work_cancel_delayable(&rsrp_work);
+}
+
+void rsrp_service_set_motion_hint(bool moving, uint32_t speed_mm_s,
+                                  uint32_t linear_accel_mg)
+{
+    bool state_changed;
+    uint32_t next_interval_sec;
+
+    state_changed = (!motion_hint_valid || (motion_hint_moving != moving));
+
+    motion_hint_valid = true;
+    motion_hint_moving = moving;
+    motion_speed_mm_s = speed_mm_s;
+    motion_linear_accel_mg = linear_accel_mg;
+
+    next_interval_sec = rsrp_target_poll_interval_sec();
+
+    if (!state_changed && (next_interval_sec == current_poll_interval_sec)) {
+        return;
+    }
+
+    current_poll_interval_sec = next_interval_sec;
+
+    LOG_INF("RSRP poll interval %u s (%s, speed=%u mm/s, accel=%u mg)",
+            current_poll_interval_sec,
+            moving ? "moving" : "still",
+            motion_speed_mm_s,
+            motion_linear_accel_mg);
+
+    if (initialized && (mode == RSRP_MODE_MONITOR)) {
+        (void)k_work_reschedule(&rsrp_work, K_SECONDS(current_poll_interval_sec));
+    }
 }

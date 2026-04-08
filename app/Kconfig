@@ -21,7 +21,16 @@ config APP_MODEM_SIGNAL_POLL_INTERVAL_SEC
     default 10
     range 1 3600
     help
-      Interval used by the modem service when sampling LTE-M RSRP.
+      Interval used by the modem service when sampling LTE-M RSRP while the
+      asset is moving, or before the accelerometer has published a motion hint.
+
+config APP_MODEM_SIGNAL_POLL_INTERVAL_STILL_SEC
+    int "LTE-M signal poll interval while stationary in seconds"
+    default 30
+    range 1 3600
+    help
+      Interval used by the modem service when the accelerometer reports that
+      the asset is standing still.
 
 config APP_MODEM_RSRP_FALLBACK_DBM
     int "LTE-M RSRP threshold for NTN fallback"
