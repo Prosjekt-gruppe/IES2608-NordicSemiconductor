@@ -142,9 +142,13 @@ static void rsrp_work_handler(struct k_work *work)
 
     ARG_UNUSED(work);
 
-    if (mode == RSRP_MODE_IDLE) {
+
+    /*
+    if (!monitor_enabled) {
         return;
     }
+    */
+
 
     switch (mode) {
     case RSRP_MODE_MONITOR:
@@ -174,12 +178,36 @@ static void rsrp_work_handler(struct k_work *work)
         /* reschedule rsrp operation with the given interval */
         (void)k_work_reschedule(&rsrp_work,
                                 K_SECONDS(CONFIG_APP_MODEM_SIGNAL_POLL_INTERVAL_SEC));
-        
+                  
+        return;
+
+
+    /* a bit patchy but it should be ok for now */
     case RSRP_MODE_PROBE:
+    
+        err = rsrp_service_get(&rsrp_dbm);
+        if (err) {
+            LOG_WRN("rsrp_service_get failed during probe: %d", err);
+            (void)k_work_reschedule(&rsrp_work, K_MSEC(PROBE_POLL_MSEC));
+            return;
+        }
+    
+        /* store sample in ring buffer */
+        rsrp_hist[rsrp_hist_idx] = rsrp_dbm;
+        rsrp_hist_idx = (rsrp_hist_idx + 1U) % RSRP_HISTORY_LEN;
+        if (rsrp_hist_count < RSRP_HISTORY_LEN) {
+            rsrp_hist_count++;
+        }
+    
         if (rsrp_hist_count < probe_target) {
             //TODO: implement it into Kconfig 
             k_work_reschedule(&rsrp_work, K_MSEC(PROBE_POLL_MSEC));
+            return;
         }
+
+        /* 
+         * TODO: make this more robust
+         */
 
         int sum = 0;
         for (int i = 0; i < rsrp_hist_count; i++) {
@@ -194,21 +222,16 @@ static void rsrp_work_handler(struct k_work *work)
             publish_rsrp_event(EVT_LTE_POOR, avg);
         }
 
+        LOG_INF("LTE probe complete: avg=%d dBm over %u samples", avg, probe_target);
         mode = RSRP_MODE_IDLE;
-        return;
 
+        return;
 
     case RSRP_MODE_IDLE:
     default:
         return;
 
     }
-
-    /*
-    if (!monitor_enabled) {
-        return;
-    }
-    */
 
 }
 

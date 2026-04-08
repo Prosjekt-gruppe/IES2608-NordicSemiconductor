@@ -281,14 +281,7 @@ static enum smf_state_result ltem_connected_run(void *obj)
     case EVT_RSRP_UPDATE:
         ctx->rsrp_dbm = ctx->ev.meas.rsrp_dbm;
         LOG_INF("Updated LTE RSRP: %d dBm", ctx->rsrp_dbm);
-
-        /*
-        if (ctx->rsrp_dbm < -120) {
-            struct app_event ev = { .type = EVT_LTE_POOR };
-            (void)app_event_put(&ev, K_NO_WAIT);
-        }
-        */
-
+        
         return SMF_EVENT_HANDLED;
 
     case EVT_LTE_POOR:
@@ -442,7 +435,7 @@ static void ntn_connecting_exit(void *obj)
 }
 
 static void ntn_timer_handler(struct k_timer *timer)
-    {
+{
     ARG_UNUSED(timer);
 
     struct app_event ev = {
@@ -547,7 +540,7 @@ static void lte_probe_entry(void *obj)
     ctx->active_rat = RAT_LTEM;
     ctx->lte_connected = true;
 
-    (void)rsrp_service_sample_and_publish();
+    (void)rsrp_service_start_probe(3);
     
     LOG_INF("lte_probe_entry");
 }
@@ -557,12 +550,21 @@ static enum smf_state_result lte_probe_run(void *obj)
     LOG_INF("lte_probe_run");
     struct app_ctx *ctx = obj;
 
-    switch(ctx->ev.type){
+    switch(ctx->ev.type) {
     case EVT_RSRP_UPDATE:
-        LOG_INF("received rsrp update");
+        LOG_INF("received rsrp update event");
         return SMF_EVENT_HANDLED;
         
-    /* TODO: handle transition to ntn or lte based on rsrp */
+    case EVT_LTE_POOR:
+        LOG_INF("LTE probe: TN still bad -> staying on NTN");
+        smf_set_state(SMF_CTX(ctx), &states[STATE_NTN_CONNECTED]);
+        return SMF_EVENT_HANDLED;
+
+    case EVT_LTE_GOOD:
+        LOG_INF("LTE probe: TN good -> connecting to LTE");
+        /* should probably go to LTEM_CONNECTING/CONNECTED but for this test its ok */
+        smf_set_state(SMF_CTX(ctx), &states[STATE_IDLE]);
+        return SMF_EVENT_HANDLED;
 
     default:
         return SMF_EVENT_HANDLED;
