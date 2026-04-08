@@ -83,7 +83,7 @@ static int publish_rsrp_event(enum app_evt_type type, int rsrp_dbm)
 static uint32_t rsrp_target_poll_interval_sec(void)
 {
     if (!motion_hint_valid) {
-        return CONFIG_APP_MODEM_SIGNAL_POLL_INTERVAL_SEC;
+        return CONFIG_APP_MODEM_SIGNAL_POLL_INTERVAL_STILL_SEC;
     }
 
     if (motion_hint_moving) {
