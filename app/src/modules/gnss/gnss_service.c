@@ -94,10 +94,8 @@ static void log_fix_data(const struct nrf_modem_gnss_pvt_data_frame *pvt)
 
 static void log_agnss_request(const struct nrf_modem_gnss_agnss_data_frame *req)
 {
+    ARG_UNUSED(req);
     LOG_INF("A-GNSS request received");
-    LOG_INF("A-GNSS sv_mask_ephe=0x%08x", req->sv_mask_ephe);
-    LOG_INF("A-GNSS sv_mask_alm=0x%08x", req->sv_mask_alm);
-    LOG_INF("A-GNSS data_flags=0x%08x", req->data_flags);
 }
 
 static void gnss_timeout_work_handler(struct k_work *work)

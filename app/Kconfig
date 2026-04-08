@@ -40,3 +40,43 @@ config APP_MODEM_RSRP_DROP_DB
       LTE-M signal is degrading toward an NTN fallback.
 
 endmenu
+
+#--------------------------
+# Custom Debugging option
+#--------------------------
+
+menu "App Debug Options"
+
+config APP_DEBUG
+  bool "Enable debug features"
+  default n 
+
+
+# Debugging BOOT STATE
+
+config APP_DEBUG_BOOT
+  bool "Debug boot state"
+  depends on APP_DEBUG
+  default n 
+  help 
+    Initialzie services in boot_entry(), but do not transisiton
+    out of STATE_BOOT when EVT_BOOT is received.  
+
+
+# Debugging LTE CONNECTING STATE
+config APP_DEBUG_LTE_CONNECTING
+  bool "Debug lte connecting"
+  depends on APP_DEBUG
+  default n
+  help 
+    Initalize sevices in ltem_connecting_run(), but do not trasistion
+    out of STATE_LTE_CONNECTING when EVT_REG_OK is received. 
+
+
+
+config APP_ENABLE_AGNSS
+  bool "Enable A-GNSS download/injection"
+  default n
+  
+
+endmenu

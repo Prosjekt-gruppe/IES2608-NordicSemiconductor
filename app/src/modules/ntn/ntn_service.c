@@ -2,7 +2,7 @@
  * Copyright (c) 2026 Nordic Semiconductor ASA
  *
  * SPDX-License-Identifier: LicenseRef-Nordic-5-Clause
- */ 
+ */
 #include "ntn_service.h"
 #include "app_events.h"
 
@@ -17,22 +17,24 @@ LOG_MODULE_REGISTER(ntn_service, LOG_LEVEL_INF);
 static int publish_evt(enum app_evt_type type)
 {
     struct app_event ev = {
-        .type = type, 
+        .type = type,
     };
-    LOG_INF("Publishing %s", app_evt_name(type)); 
-    return app_event_put(&ev, K_NO_WAIT); 
+    LOG_INF("Publishing %s", app_evt_name(type));
+    return app_event_put(&ev, K_NO_WAIT);
 }
 */
 
 static void ntn_lc_evt_handler(const struct lte_lc_evt *const evt)
 {
-    //struct app_event app_ev = {0};
-    
-    switch (evt->type) {
+    // struct app_event app_ev = {0};
+
+    switch (evt->type)
+    {
     case LTE_LC_EVT_NW_REG_STATUS:
         LOG_INF("NTN NW registration status: %d", evt->nw_reg_status);
 
-        switch (evt->nw_reg_status) {
+        switch (evt->nw_reg_status)
+        {
         case LTE_LC_NW_REG_REGISTERED_HOME:
         case LTE_LC_NW_REG_REGISTERED_ROAMING:
             LOG_INF("NTN registered on network");
@@ -53,25 +55,26 @@ static void ntn_lc_evt_handler(const struct lte_lc_evt *const evt)
         break;
 
     case LTE_LC_EVT_PDN:
-        switch (evt->pdn.type) {
+        switch (evt->pdn.type)
+        {
 
         case LTE_LC_EVT_PDN_ACTIVATED:
             LOG_INF("NTN: PDN activated");
-            //app_ev.type = EVT_PDN_UP;
+            // app_ev.type = EVT_PDN_UP;
             (void)app_event_publish_type(EVT_PDN_UP);
             break;
 
         case LTE_LC_EVT_PDN_DEACTIVATED:
         case LTE_LC_EVT_PDN_NETWORK_DETACH:
             LOG_INF("NTN: PDN down");
-            //app_ev.type = EVT_PDN_DOWN;
+            // app_ev.type = EVT_PDN_DOWN;
             (void)app_event_publish_type(EVT_PDN_DOWN);
             break;
 
         default:
             break;
         }
-    break;
+        break;
 
     case LTE_LC_EVT_CELLULAR_PROFILE_ACTIVE:
         LOG_INF("NTN cellular profile active");
@@ -87,7 +90,6 @@ static void ntn_lc_evt_handler(const struct lte_lc_evt *const evt)
     }
 }
 
-
 static int ntn_service_prepare(struct app_ctx *ctx)
 {
     int err;
@@ -98,33 +100,39 @@ static int ntn_service_prepare(struct app_ctx *ctx)
         .uicc = LTE_LC_UICC_PHYSICAL,
     };
 
-    if (!ctx->ntn_initialized) {
+    if (!ctx->ntn_initialized)
+    {
         err = lte_lc_power_off();
-        if (err) {
+        if (err)
+        {
             return err;
         }
 
         err = lte_lc_cellular_profile_configure(&ntn_profile);
-        if (err) {
+        if (err)
+        {
             return err;
         }
 
         ctx->ntn_initialized = true;
     }
 
-    if (ctx->have_fix) {
-        err = ntn_location_set((double)ctx->last_pvt.latitude,
-                               (double)ctx->last_pvt.longitude,
-                               (float)ctx->last_pvt.altitude,
+    if (ctx->final_fix)
+    {
+        err = ntn_location_set((double)ctx->final_pvt.latitude,
+                               (double)ctx->final_pvt.longitude,
+                               (float)ctx->final_pvt.altitude,
                                0);
-        if (err) {
-            return err;
+        if (err)
+        {
+            LOG_WRN("ntn_location_set failed: %d", err);
         }
     }
 
     err = lte_lc_system_mode_set(LTE_LC_SYSTEM_MODE_NTN_NBIOT,
                                  LTE_LC_SYSTEM_MODE_PREFER_AUTO);
-    if (err) {
+    if (err)
+    {
         return err;
     }
 
@@ -137,7 +145,8 @@ int ntn_service_connect(struct app_ctx *ctx)
     int err;
 
     err = ntn_service_prepare(ctx);
-    if (err) {
+    if (err)
+    {
         return err;
     }
 

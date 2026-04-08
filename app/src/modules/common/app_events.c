@@ -22,44 +22,56 @@ ZBUS_CHAN_DEFINE(app_evt_chan,
 const char *app_evt_name(enum app_evt_type type)
 {
     switch (type) {
+    case EVT_BOOT:
+        return "EVT_BOOT";
 
-    /* BOOT */
-    case EVT_BOOT: return "EVT_BOOT";
+    case EVT_REG_OK:
+        return "EVT_REG_OK";
+    case EVT_REG_FAIL:
+        return "EVT_REG_FAIL";
 
-    /* LTE-REGISTRATION */
-    case EVT_REG_OK: return "EVT_REG_OK";
-    case EVT_REG_FAIL: return "EVT_REG_FAIL";
+    case EVT_LTE_LOC_OK:
+        return "EVT_LTE_LOC_OK";
+    case EVT_LTE_LOC_FAIL:
+        return "EVT_LTE_LOC_FAIL";
+    case EVT_LTE_LOC_TIMEOUT:
+        return "EVT_LTE_LOC_TIMEOUT";
 
-    /* LTE Location */
-    case EVT_LTE_lOC_OK: return "EVT_LTE_LOC_OK";
-    case EVT_LTE_LOC_FAIL: return "EVT_LTE_LOC_FAIL"; 
-    case EVT_LTE_LOC_TIMEOUT: return "EVT_LTE_LOC_TIMEOUT"; 
+    case EVT_AGNSS_REQUEST:
+        return "EVT_AGNSS_REQUEST";
+    case EVT_AGNSS_READY:
+        return "EVT_AGNSS_READY";
+    case EVT_AGNSS_FAIL:
+        return "EVT_AGNSS_FAIL";
 
-    /* AGNSS */
-    case EVT_AGNSS_REQUEST: return "EVT_AGNSS_REQUEST";
-    case EVT_AGNSS_READY: return "EVT_AGNSS_READY": 
-    case EVT_AGNSS_FAIL: return "EVT_AGNSS_FAIL"; 
+    case EVT_GNSS_FIX:
+        return "EVT_GNSS_FIX";
+    case EVT_GNSS_TIMEOUT:
+        return "EVT_GNSS_TIMEOUT";
 
-    /* GNSS refine */
-    case EVT_GNSS_FIX: return "EVT_GNSS_FIX";
-    case EVT_GNSS_TIMEOUT: return "EVT_GNSS_TIMEOUT";
+    case EVT_NTN_PREPARE_DONE:
+        return "EVT_NTN_PREPARE_DONE";
+    case EVT_NTN_TIMEOUT:
+        return "EVT_NTN_TIMEOUT";
 
-    /* NTN */
-    case EVT_NTN_REG_FAIL: return "EVT_NTN_REG_FAIL";
-    case EVT_NTN_TIMEOUT: return "EVT_NTN_TIMEOUT";
+    case EVT_TIMEOUT:
+        return "EVT_TIMEOUT";
 
-    
-    case EVT_TIMEOUT: return "EVT_TIMEOUT";
+    case EVT_RSRP_UPDATE:
+        return "EVT_RSRP_UPDATE";
+    case EVT_LTE_POOR:
+        return "EVT_LTE_POOR";
 
-    /* LTE signal*/
-    case EVT_RSRP_UPDATE: return "EVT_RSRP_UPDATE";
-    case EVT_LTE_POOR: return "EVT_LTE_POOR";
+    case EVT_BACKOFF_TIMEOUT:
+        return "EVT_BACKOFF_TIMEOUT";
 
-    /* Backoff */
-    case EVT_BACKOFF_TIMEOUT: return "EVT_BACKOFF_TIMEOUT";
-    case EVT_PDN_UP: return "EVT_PDN_UP";
-    case EVT_PDN_DOWN: return "EVT_PDN_DOWN";
-    default: return "EVT_UNKNOWN";
+    case EVT_PDN_UP:
+        return "EVT_PDN_UP";
+    case EVT_PDN_DOWN:
+        return "EVT_PDN_DOWN";
+
+    default:
+        return "EVT_UNKNOWN";
     }
 }
 
