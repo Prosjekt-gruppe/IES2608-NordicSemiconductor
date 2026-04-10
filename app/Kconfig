@@ -56,6 +56,22 @@ config APP_MODEM_RSRP_DROP_DB
       Minimum drop in dB used by the modem service when deciding that the
       LTE-M signal is degrading toward an NTN fallback.
 
+config APP_SENSOR_ACCEL_DEMO
+    bool "Enable accelerometer demo"
+    default y if BOARD_THINGY91X_NRF9151_NS
+    default n
+    help
+      Build the BMI270 accelerometer demo and motion-hint generation.
+      Enable this on boards that actually provide a compatible accelerometer.
+
+config APP_SENSOR_BATT_DEMO
+    bool "Enable battery demo"
+    default y if BOARD_THINGY91X_NRF9151_NS
+    default n
+    help
+      Build the nPM1300 battery/charger demo.
+      Enable this on boards that actually provide compatible battery hardware.
+
 config APP_CORE_SEND_UDP_DATA
     bool "Send UDP data over NTN"
     help
