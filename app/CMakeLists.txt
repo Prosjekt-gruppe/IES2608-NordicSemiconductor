@@ -18,7 +18,6 @@ target_sources(app PRIVATE src/main.c
     src/modules/modem/modem_service.c
     src/modules/ntn/ntn_service.c
     src/modules/rsrp/rsrp_service.c
-    src/modules/sensors/accel.c
 )
 
 
@@ -33,6 +32,10 @@ target_include_directories(app PRIVATE
     src/modules/sensors
 )
 
-target_sources(app PRIVATE
-    src/modules/sensors/batt.c
-)
+if(CONFIG_APP_SENSOR_ACCEL_DEMO)
+    target_sources(app PRIVATE src/modules/sensors/accel.c)
+endif()
+
+if(CONFIG_APP_SENSOR_BATT_DEMO)
+    target_sources(app PRIVATE src/modules/sensors/batt.c)
+endif()

@@ -22,7 +22,9 @@
 #include "app_types.h"
 #include "app_events.h"
 #include "app_sm.h"
+#if defined(CONFIG_APP_SENSOR_ACCEL_DEMO)
 #include "accel.h"
+#endif
 
 
 LOG_MODULE_REGISTER(app, LOG_LEVEL_INF);
@@ -42,8 +44,9 @@ int main(void)
 
     LOG_INF("Firmware version: %s", APP_VERSION_STRING);
 
+#if defined(CONFIG_APP_SENSOR_ACCEL_DEMO)
     accel_start();
-    
+#endif
 
     while (1) {
         k_sleep(K_SECONDS(60));
