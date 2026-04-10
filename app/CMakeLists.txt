@@ -30,5 +30,17 @@ target_include_directories(app PRIVATE
     src/modules/modem
     src/modules/ntn
     src/modules/rsrp
+<<<<<<< HEAD
     src/modules/location
+=======
+    src/modules/sensors
+>>>>>>> origin/main
 )
+
+if(CONFIG_APP_SENSOR_ACCEL_DEMO)
+    target_sources(app PRIVATE src/modules/sensors/accel.c)
+endif()
+
+if(CONFIG_APP_SENSOR_BATT_DEMO)
+    target_sources(app PRIVATE src/modules/sensors/batt.c)
+endif()

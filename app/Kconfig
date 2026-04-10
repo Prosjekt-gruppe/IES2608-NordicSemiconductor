@@ -18,10 +18,19 @@ config APP_GNSS_TIMEOUT_SEC
 
 config APP_MODEM_SIGNAL_POLL_INTERVAL_SEC
     int "LTE-M signal poll interval in seconds"
-    default 10
+    default 5
     range 1 3600
     help
-      Interval used by the modem service when sampling LTE-M RSRP.
+      Interval used by the modem service when sampling LTE-M RSRP while the
+      asset is moving.
+
+config APP_MODEM_SIGNAL_POLL_INTERVAL_STILL_SEC
+    int "LTE-M signal poll interval while stationary in seconds"
+    default 30
+    range 1 3600
+    help
+      Interval used by the modem service when the accelerometer reports that
+      the asset is standing still, or before any valid motion hint is available.
 
 config APP_MODEM_RSRP_FALLBACK_DBM
     int "LTE-M RSRP threshold for NTN fallback"
@@ -31,6 +40,14 @@ config APP_MODEM_RSRP_FALLBACK_DBM
       When the measured LTE-M RSRP is at or below this level and continues
       to worsen, the modem service requests NTN fallback.
 
+config APP_MODEM_RSRP_RECOVERY_DBM
+    int "NTE->LTE recovery threshold"
+    default -90
+    range -120 -10
+    help
+      When LTE-M RSRP is showing signs of improving this value
+      decides if it should return to LTE-M-Connetion or not.
+
 config APP_MODEM_RSRP_DROP_DB
     int "LTE-M RSRP drop needed to treat the trend as degrading"
     default 5
@@ -38,6 +55,33 @@ config APP_MODEM_RSRP_DROP_DB
     help
       Minimum drop in dB used by the modem service when deciding that the
       LTE-M signal is degrading toward an NTN fallback.
+
+config APP_SENSOR_ACCEL_DEMO
+    bool "Enable accelerometer demo"
+    default y if BOARD_THINGY91X_NRF9151_NS
+    default n
+    help
+      Build the BMI270 accelerometer demo and motion-hint generation.
+      Enable this on boards that actually provide a compatible accelerometer.
+
+config APP_SENSOR_BATT_DEMO
+    bool "Enable battery demo"
+    default y if BOARD_THINGY91X_NRF9151_NS
+    default n
+    help
+      Build the nPM1300 battery/charger demo.
+      Enable this on boards that actually provide compatible battery hardware.
+
+config APP_CORE_SEND_UDP_DATA
+    bool "Send UDP data over NTN"
+    help
+      Enable UDP sending in the NTN module.
+
+config APP_CORE_SM_PROBE_TEST
+    bool "Start dry run for LTE-PROBE"
+    help
+      Enable LTE-Probe dry run.
+
 
 endmenu
 
@@ -64,6 +108,7 @@ config APP_DEBUG_LTE_CONNECTING
     Allow LTE attach to complete, then stop before transistioning
     STATE_LTEM_CONNECTED
 
+<<<<<<< HEAD
 config APP_DEBUG_LTE_LOCATION
   bool "Halt after LTE location result"
   depends on APP_DEBUG
@@ -73,3 +118,6 @@ config APP_DEBUG_LTE_LOCATION
     instead of continuing to later stages
 endmenu
 
+=======
+endmenu
+>>>>>>> origin/main

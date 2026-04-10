@@ -1,0 +1,14 @@
+/*
+ * Enable the high performance IMU on Thingy:91 X so the app can poll the
+ * onboard BMI270 accelerometer through the Zephyr sensor API.
+ */
+
+/ {
+	aliases {
+		accel0 = &accelerometer_hp;
+	};
+};
+
+&accelerometer_hp {
+	status = "okay";
+};

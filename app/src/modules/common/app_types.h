@@ -24,7 +24,10 @@ enum app_state {
     STATE_NTN_CONNECTED,
     STATE_LTEM_CONNECTING,
     STATE_LTEM_CONNECTED,
+<<<<<<< HEAD
     STATE_LTE_LOCATION,
+=======
+>>>>>>> origin/main
     STATE_LTE_PROBE,
     STATE_BACKOFF,
 };
@@ -42,9 +45,12 @@ enum app_evt_type {
     EVT_RSRP_UPDATE,
     EVT_LTE_POOR,
     EVT_LTE_GOOD,
+<<<<<<< HEAD
     EVT_LTE_LOC_OK,
     EVT_LTE_LOC_FAIL,
     EVT_LTE_LOC_TIMEOUT,
+=======
+>>>>>>> origin/main
     EVT_BACKOFF_TIMEOUT,
     EVT_PDN_UP,
     EVT_PDN_DOWN,
@@ -86,6 +92,8 @@ struct app_ctx {
 
     /* timers */
     struct k_timer backoff_timer;
+    struct k_timer ntn_timer;
+    struct k_timer lte_timer;
 
     /* pdn */
     bool pdn_up;
