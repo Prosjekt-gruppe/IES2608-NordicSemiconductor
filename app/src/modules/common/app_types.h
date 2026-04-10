@@ -25,6 +25,7 @@ enum app_state {
     STATE_LTEM_CONNECTING,
     STATE_LTEM_CONNECTED,
     STATE_LTE_LOCATION,
+    STATE_LTE_PROBE,
     STATE_BACKOFF,
 };
 
@@ -40,6 +41,7 @@ enum app_evt_type {
     EVT_TIMEOUT,
     EVT_RSRP_UPDATE,
     EVT_LTE_POOR,
+    EVT_LTE_GOOD,
     EVT_LTE_LOC_OK,
     EVT_LTE_LOC_FAIL,
     EVT_LTE_LOC_TIMEOUT,

@@ -47,6 +47,8 @@ static void lte_location_exit(void *obj);
 
 static void backoff_entry(void *obj);
 static enum smf_state_result backoff_run(void *obj);
+static void backoff_exit(void *obj);
+
 
 static void gnss_acquire_entry(void *obj);
 static enum smf_state_result gnss_acquire_run(void *obj);
@@ -66,6 +68,10 @@ static void handle_gnss_status(struct app_ctx *ctx, const struct app_gnss_status
 
 static void dispatch_app_event(struct app_ctx *ctx, const struct app_event *ev);
 static void backoff_timer_handler(struct k_timer *timer);
+
+static void ntn_timer_handler(struct k_timer *timer);
+static void ltem_timer_handler(struct k_timer *timer);
+
 
 static const struct smf_state states[] = {
     [STATE_BOOT] = SMF_CREATE_STATE(
@@ -261,6 +267,13 @@ static void ltem_connected_entry(void *obj)
     }
     */
 
+    /*
+    err = rsrp_service_start();
+    if (err < 0) {
+    LOG_WRN("Failed to start LTE signal monitor: %d", err);
+    }
+    */
+
     LOG_INF("ltem_connected_entry ok");
     LOG_INF("STATE_LTEM_CONNECTED --> STATE_LTE_LOCATION");
     smf_set_state(SMF_CTX(ctx), &states[STATE_LTE_LOCATION]);
@@ -383,12 +396,6 @@ static void lte_location_exit(void *obj)
     }
 
     LOG_INF("lte location exit");
-}
-static void dispatch_app_event(struct app_ctx *ctx, const struct app_event *ev)
-{
-    ctx->ev = *ev;
-    LOG_INF("SMF thread got event %s", app_evt_name(ev->type));
-    (void)smf_run_state(SMF_CTX(ctx));
 }
 
 
