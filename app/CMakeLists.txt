@@ -41,3 +41,7 @@ endif()
 if(CONFIG_APP_SENSOR_BATT_DEMO)
     target_sources(app PRIVATE src/modules/sensors/batt.c)
 endif()
+
+if(CONFIG_APP_SENSOR_TEMP_DEMO)
+    target_sources(app PRIVATE src/modules/sensors/temp.c)
+endif()
