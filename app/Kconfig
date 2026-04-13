@@ -72,6 +72,14 @@ config APP_SENSOR_BATT_DEMO
       Build the nPM1300 battery/charger demo.
       Enable this on boards that actually provide compatible battery hardware.
 
+config APP_SENSOR_TEMP_DEMO
+    bool "Enable temperature demo"
+    default y if BOARD_THINGY91X_NRF9151_NS
+    default n
+    help
+      Build the BME680 environmental sensor demo.
+      Enable this on boards that actually provide a compatible temperature sensor.
+
 config APP_CORE_SEND_UDP_DATA
     bool "Send UDP data over NTN"
     help

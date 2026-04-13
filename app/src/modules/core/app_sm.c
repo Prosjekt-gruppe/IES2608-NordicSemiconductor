@@ -308,14 +308,10 @@ static void ltem_connected_entry(void *obj)
         LOG_WRN("Could not read LTE RSRP: %d", err);
     }
 
-    /*
-    err = rsrp_service_start();
-    
     err = rsrp_service_start_monitor();
     if (err < 0) {
-    LOG_WRN("Failed to start LTE signal monitor: %d", err);
+        LOG_WRN("Failed to start LTE signal monitor: %d", err);
     }
-    */
 
     /*
     err = rsrp_service_start();

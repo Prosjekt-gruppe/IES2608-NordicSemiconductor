@@ -35,7 +35,7 @@ This is still prototype firmware, not a finished product. The main goal right no
 
 | Area | What it does |
 | --- | --- |
-| App architecture | Uses Zephyr SMF and zbus to split the firmware into focused modules |
+| App architecture | Uses Zephyr SMF and zbus to split the firmware into focused modules and sensor sample channels |
 | LTE-M | Handles modem bring-up, LTE attach, registration flow, and LTE-side state transitions |
 | RSRP service | Samples LTE RSRP, detects degrading signal, and can trigger fallback decisions |
 | Motion-aware polling | Uses the accelerometer to poll RSRP faster while moving and slower while still |
@@ -43,6 +43,7 @@ This is still prototype firmware, not a finished product. The main goal right no
 | GNSS | Includes GNSS acquisition hooks for NTN-related flow decisions |
 | Accelerometer demo | Reads the Thingy:91 X BMI270, reports movement, and does simple standstill recalibration |
 | Battery demo | Reads the nPM1300 charger and logs battery, charging, USB, current, and temperature data |
+| Temperature demo | Reads the Thingy:91 X BME680 and logs temperature, pressure, humidity, and gas resistance |
 | LTE probe path | Includes an experimental LTE recovery probe flow from NTN back toward LTE |
 
 ## Workflow
@@ -80,7 +81,7 @@ flowchart LR
 
 - `thingy91x/nrf9151/ns`
 
-The current direction is the Thingy:91 X, including its onboard sensors such as the BMI270 accelerometer and the nPM1300 battery/charger hardware.
+The current direction is the Thingy:91 X, including its onboard sensors such as the BMI270 accelerometer, BME680 environmental sensor, and nPM1300 battery/charger hardware.
 
 ### Secondary bring-up target
 
@@ -97,7 +98,7 @@ The sensor folder already contains starter files for multiple Thingy:91 X sensor
 - `gyro.*`
 - `temp.*`
 
-Right now, the accelerometer and battery modules are the active demos. The gyro and temperature files are present for future work.
+Right now, the accelerometer, battery, and temperature modules are the active demos. They log to serial and publish their latest samples on zbus channels for later app integration. The gyro file is present for future work.
 
 ## Build and flash
 
