@@ -80,6 +80,15 @@ static int publish_rsrp_event(enum app_evt_type type, int rsrp_dbm)
     return app_event_put(&ev, K_NO_WAIT);
 }
 
+static const char *rsrp_motion_state_str(void)
+{
+    if (!motion_hint_valid) {
+        return "unknown";
+    }
+
+    return motion_hint_moving ? "moving" : "still";
+}
+
 static uint32_t rsrp_target_poll_interval_sec(void)
 {
     if (!motion_hint_valid) {
@@ -180,8 +189,13 @@ static void rsrp_work_handler(struct k_work *work)
             return;
         }
     
-        /* signal main sm to update ctx-obj with newest rsrp sample */
-        LOG_INF("LTE-M RSRP: %d dBm", rsrp_dbm);
+        current_poll_interval_sec = rsrp_target_poll_interval_sec();
+        LOG_INF("LTE-M RSRP: %d dBm, next=%u s, motion=%s, speed=%u mm/s, accel=%u mg",
+                rsrp_dbm,
+                current_poll_interval_sec,
+                rsrp_motion_state_str(),
+                motion_speed_mm_s,
+                motion_linear_accel_mg);
         (void)publish_rsrp_event(EVT_RSRP_UPDATE, rsrp_dbm);
 
         /* signal main sm to exit lte-connected state */
@@ -195,7 +209,6 @@ static void rsrp_work_handler(struct k_work *work)
         }
 
         /* reschedule rsrp operation with the given interval */
-        current_poll_interval_sec = rsrp_target_poll_interval_sec();
         (void)k_work_reschedule(&rsrp_work,
                                 K_SECONDS(current_poll_interval_sec));
         return;
@@ -217,6 +230,9 @@ static void rsrp_work_handler(struct k_work *work)
         if (rsrp_hist_count < RSRP_HISTORY_LEN) {
             rsrp_hist_count++;
         }
+
+        LOG_INF("LTE probe RSRP sample %u/%u: %d dBm",
+                rsrp_hist_count, probe_target, rsrp_dbm);
     
         if (rsrp_hist_count < probe_target) {
             //TODO: implement it into Kconfig 
@@ -339,6 +355,9 @@ int rsrp_service_start_monitor(void)
     mode = RSRP_MODE_MONITOR;
     reset_signal_tracking();
     current_poll_interval_sec = rsrp_target_poll_interval_sec();
+
+    LOG_INF("Starting LTE-M RSRP monitor: interval=%u s, motion=%s",
+            current_poll_interval_sec, rsrp_motion_state_str());
 
     return k_work_reschedule(&rsrp_work,
         K_SECONDS(current_poll_interval_sec));
