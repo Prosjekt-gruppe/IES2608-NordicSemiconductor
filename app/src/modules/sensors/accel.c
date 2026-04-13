@@ -5,6 +5,7 @@
  */
 
 #include "accel.h"
+#include "app_zbus.h"
 #include "rsrp_service.h"
 
 #include <stdbool.h>
@@ -31,6 +32,7 @@ LOG_MODULE_REGISTER(accel, LOG_LEVEL_INF);
 #define ACCEL_ZERO_VELOCITY_MS       4000
 #define ACCEL_BASELINE_ADAPT_DIV     16
 #define ACCEL_MOVEMENT_LOG_INTERVAL_MS 1000
+#define ACCEL_ZBUS_PUBLISH_INTERVAL_MS 1000
 #define ACCEL_MG_TO_MM_S2            9807
 #define ACCEL_MAX_DT_MS              1000
 
@@ -196,6 +198,7 @@ static void accel_thread(void *arg1, void *arg2, void *arg3)
 	uint32_t quiet_time_ms = 0;
 	uint32_t last_sample_ts_ms = 0;
 	uint32_t last_motion_log_ts_ms = 0;
+	uint32_t last_zbus_publish_ts_ms = 0;
 
 	while (true) {
 		int32_t xyz_mg[3];
@@ -206,6 +209,7 @@ static void accel_thread(void *arg1, void *arg2, void *arg3)
 		uint32_t linear_accel_mg;
 		uint32_t speed_mm_s;
 		bool moving_now;
+		bool motion_state_changed;
 
 		if (ret < 0) {
 			LOG_WRN("Accelerometer read failed: %d", ret);
@@ -214,10 +218,15 @@ static void accel_thread(void *arg1, void *arg2, void *arg3)
 		}
 
 		if (!have_baseline) {
+			const int32_t zero_linear_xyz_mg[3] = { 0 };
+
 			accel_copy_xyz(baseline_xyz_mg, xyz_mg);
 			have_baseline = true;
 			last_sample_ts_ms = now_ms;
 			rsrp_service_set_motion_hint(false, 0, 0);
+			(void)app_zbus_publish_accel_sample(false, 0, 0, 0,
+							    xyz_mg, zero_linear_xyz_mg);
+			last_zbus_publish_ts_ms = now_ms;
 			motion_hint_sent = true;
 			k_sleep(K_MSEC(ACCEL_POLL_INTERVAL_MS));
 			continue;
@@ -280,7 +289,9 @@ static void accel_thread(void *arg1, void *arg2, void *arg3)
 				linear_xyz_mg[0], linear_xyz_mg[1], linear_xyz_mg[2]);
 		}
 
-		if (!motion_hint_sent || (moving_now != moving)) {
+		motion_state_changed = (!motion_hint_sent || (moving_now != moving));
+
+		if (motion_state_changed) {
 			rsrp_service_set_motion_hint(moving_now, speed_mm_s, linear_accel_mg);
 
 			if (moving_now) {
@@ -293,6 +304,14 @@ static void accel_thread(void *arg1, void *arg2, void *arg3)
 
 			moving = moving_now;
 			motion_hint_sent = true;
+		}
+
+		if (motion_state_changed || (last_zbus_publish_ts_ms == 0U) ||
+		    ((now_ms - last_zbus_publish_ts_ms) >= ACCEL_ZBUS_PUBLISH_INTERVAL_MS)) {
+			(void)app_zbus_publish_accel_sample(moving_now, speed_mm_s,
+							    linear_accel_mg, quiet_time_ms,
+							    xyz_mg, linear_xyz_mg);
+			last_zbus_publish_ts_ms = now_ms;
 		}
 
 		k_sleep(K_MSEC(ACCEL_POLL_INTERVAL_MS));
