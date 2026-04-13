@@ -140,6 +140,13 @@ int ntn_service_connect(struct app_ctx *ctx)
     if (err) {
         return err;
     }
+    
+/* verbose modem */
+#ifndef CONFIG_APP_DEBUG_NTN
+    cereg_notification_enable();
+#endif
 
     return lte_lc_connect_async(ntn_lc_evt_handler);
+
+
 }
