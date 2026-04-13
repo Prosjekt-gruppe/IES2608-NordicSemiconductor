@@ -13,6 +13,7 @@
 #include "ntn_service.h"
 #include "modem_service.h"
 #include "lte_service.h"
+#include "location_service.h"
 
 
 #include <modem/nrf_modem_lib.h>
@@ -40,9 +41,13 @@ static void ltem_connected_entry(void *obj);
 static enum smf_state_result ltem_connected_run(void *obj);
 static void ltem_connected_exit(void *obj); 
 
+static void lte_location_entry(void *obj); 
+static enum smf_state_result lte_location_run(void *obj); 
+static void lte_location_exit(void *obj);
+
 static void backoff_entry(void *obj);
 static enum smf_state_result backoff_run(void *obj);
-static void backoff_exit(void * obj);
+static void backoff_exit(void *obj);
 
 static void gnss_acquire_entry(void *obj);
 static enum smf_state_result gnss_acquire_run(void *obj);
@@ -69,6 +74,10 @@ static void ntn_timer_handler(struct k_timer *timer);
 static void ltem_timer_handler(struct k_timer *timer);
 
 
+static void ntn_timer_handler(struct k_timer *timer);
+static void ltem_timer_handler(struct k_timer *timer);
+
+
 static const struct smf_state states[] = {
     [STATE_BOOT] = SMF_CREATE_STATE(
         boot_entry,
@@ -90,7 +99,14 @@ static const struct smf_state states[] = {
         ltem_connected_exit,
         NULL,
         NULL
-    ),    
+    ),
+    [STATE_LTE_LOCATION] = SMF_CREATE_STATE(
+        lte_location_entry,
+        lte_location_run,
+        lte_location_exit,
+        NULL,
+        NULL
+    ),
     [STATE_GNSS_ACQUIRE] = SMF_CREATE_STATE(
         gnss_acquire_entry,
         gnss_acquire_run,
@@ -156,6 +172,12 @@ static void boot_entry(void *obj)
     if (err){
         LOG_ERR("lte_service_init err=%d", err); 
         return; 
+    }
+
+    err = location_service_init();
+    if (err){
+        LOG_ERR("location_service_init err=%d", err);
+        return;
     }
 
     err = rsrp_service_init();
@@ -269,11 +291,22 @@ static void ltem_connected_entry(void *obj)
     } else {
         LOG_WRN("Could not read LTE RSRP: %d", err);
     }
+
+    /*
+    err = rsrp_service_start();
     
     err = rsrp_service_start_monitor();
     if (err < 0) {
-        LOG_WRN("Failed to start LTE signal monitor: %d", err);
+    LOG_WRN("Failed to start LTE signal monitor: %d", err);
     }
+    */
+
+    /*
+    err = rsrp_service_start();
+    if (err < 0) {
+    LOG_WRN("Failed to start LTE signal monitor: %d", err);
+    }
+    */
 
 #if defined(CONFIG_APP_CORE_SM_PROBE_TEST)
     LOG_INF("ltem timer start");
@@ -281,6 +314,8 @@ static void ltem_connected_entry(void *obj)
 #endif
 
     LOG_INF("ltem_connected_entry ok");
+    LOG_INF("STATE_LTEM_CONNECTED --> STATE_LTE_LOCATION");
+    smf_set_state(SMF_CTX(ctx), &states[STATE_LTE_LOCATION]);
 
 }
 
@@ -316,17 +351,96 @@ static enum smf_state_result ltem_connected_run(void *obj)
 
 static void ltem_connected_exit(void *obj)
 {
+    ARG_UNUSED(obj);
+
+    /*
     struct app_ctx *ctx = obj;
     int err = rsrp_service_stop();
     if (err) {
         LOG_WRN("Failed to stop LTE signal monitor: %d", err);
     }
     ctx->lte_connected = false;
+    */
+}
+
+static void lte_location_entry(void *obj)
+{
+    ARG_UNUSED(obj);
+
+    int err = location_service_start_lte_location();
+    if (err){
+        LOG_ERR("location_service_start_lte_location err=%d", err);
+        (void)app_event_publish_type(EVT_LTE_LOC_FAIL);
+        return;
+    }
+    LOG_INF("LTE location started");
+}
+
+static enum smf_state_result lte_location_run(void *obj)
+{
+    struct app_ctx *ctx = obj;
+
+    switch (ctx->ev.type){
+        case EVT_LTE_LOC_OK:
+            ctx->last_pvt = ctx->ev.pvt;
+            ctx->have_fix = true; 
+
+            LOG_INF("LTE location fix stored: lat=%f lon=%f",
+                (double)ctx->last_pvt.latitude,
+                (double)ctx->last_pvt.longitude);
+            
+            if (IS_ENABLED(CONFIG_APP_DEBUG_LTE_LOCATION)){
+                LOG_INF("DEBUG: Halting after LTE location success"); 
+                smf_set_state(SMF_CTX(ctx), &states[STATE_IDLE]);
+
+            }else {
+                smf_set_state(SMF_CTX(ctx), &states[STATE_IDLE]);
+            }
+            return SMF_EVENT_HANDLED;
+
+        case EVT_LTE_LOC_FAIL:
+            LOG_WRN("LTE location failed");
+
+            if (IS_ENABLED(CONFIG_APP_DEBUG_LTE_LOCATION)){
+                LOG_INF("DEBUG: HALTING after LTE location failure");
+                smf_set_state(SMF_CTX(ctx), &states[STATE_IDLE]);
+            }else {
+                smf_set_state(SMF_CTX(ctx), &states[STATE_IDLE]);
+            }
+            return SMF_EVENT_HANDLED;
+
+        case EVT_LTE_LOC_TIMEOUT:
+            LOG_WRN("LTE location timeout");
+
+            if(IS_ENABLED(CONFIG_APP_DEBUG_LTE_LOCATION)){
+                LOG_INF("DEBUG: Halting after LTE location timeout");
+                smf_set_state(SMF_CTX(ctx), &states[STATE_IDLE]);
+            } else {
+                smf_set_state(SMF_CTX(ctx), &states[STATE_IDLE]);
+            }
+            return SMF_EVENT_HANDLED;
+
+        default:
+            return SMF_EVENT_HANDLED;
+    }
+}
+
+static void lte_location_exit(void *obj)
+{
+    ARG_UNUSED(obj);
+
+    int err = location_service_stop();
+    if (err) {
+        LOG_WRN("location_service_stop failed: %d", err);
+    }
+
+    LOG_INF("lte location exit");
+}
 
 #if defined(CONFIG_APP_CORE_SM_PROBE_TEST)
     k_timer_stop(&ctx->lte_timer);
 #endif
-}
+
 
 
 

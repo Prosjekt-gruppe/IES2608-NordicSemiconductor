@@ -22,6 +22,8 @@
 #include "app_types.h"
 #include "app_events.h"
 #include "app_sm.h"
+
+
 #if defined(CONFIG_APP_SENSOR_ACCEL_DEMO)
 #include "accel.h"
 #endif

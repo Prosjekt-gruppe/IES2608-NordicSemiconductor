@@ -108,4 +108,12 @@ config APP_DEBUG_LTE_CONNECTING
     Allow LTE attach to complete, then stop before transistioning
     STATE_LTEM_CONNECTED
 
+config APP_DEBUG_LTE_LOCATION
+  bool "Halt after LTE location result"
+  depends on APP_DEBUG
+  default n
+  help 
+    Stop after LTE cellular location returns sucess, failure or timeout, 
+    instead of continuing to later stages
 endmenu
+
