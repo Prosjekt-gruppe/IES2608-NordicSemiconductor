@@ -47,9 +47,10 @@ static void location_event_handler(const struct location_event_data *event_data)
 
     switch (event_data->id){
         case LOCATION_EVT_LOCATION:
-            LOG_INF("LTE location success: lat=%f lon=%f",
+            LOG_INF("LTE location success: lat=%f lon=%f acc=%f m",
             (double)event_data->location.latitude,
-            (double)event_data->location.longitude);
+            (double)event_data->location.longitude,
+            (double)event_data->location.accuracy);
         err = publish_lte_loc_ok(&event_data->location); 
         LOG_INF("Published EVT_lOC_OK err=%d", err);
         break;
