@@ -31,6 +31,9 @@ LOG_MODULE_REGISTER(accel, LOG_LEVEL_INF);
 #define ACCEL_MOVING_SPEED_MM_S      250
 #define ACCEL_ZERO_VELOCITY_MS       4000
 #define ACCEL_BASELINE_ADAPT_DIV     16
+#define ACCEL_BASELINE_SAMPLES       8
+#define ACCEL_GRAVITY_MIN_MG         700
+#define ACCEL_GRAVITY_MAX_MG         1300
 #define ACCEL_MOVEMENT_LOG_INTERVAL_MS 1000
 #define ACCEL_ZBUS_PUBLISH_INTERVAL_MS 1000
 #define ACCEL_MG_TO_MM_S2            9807
@@ -84,6 +87,19 @@ static uint32_t accel_vector_magnitude_mg(int32_t x_mg, int32_t y_mg, int32_t z_
 	return accel_isqrt64(sum);
 }
 
+static uint32_t accel_raw_magnitude_mg(const int32_t xyz_mg[3])
+{
+	return accel_vector_magnitude_mg(xyz_mg[0], xyz_mg[1], xyz_mg[2]);
+}
+
+static bool accel_sample_is_gravity_like(const int32_t xyz_mg[3])
+{
+	uint32_t magnitude_mg = accel_raw_magnitude_mg(xyz_mg);
+
+	return (magnitude_mg >= ACCEL_GRAVITY_MIN_MG) &&
+	       (magnitude_mg <= ACCEL_GRAVITY_MAX_MG);
+}
+
 static bool accel_velocity_is_zero(const int32_t velocity_mm_s[3])
 {
 	return (velocity_mm_s[0] == 0) &&
@@ -91,11 +107,11 @@ static bool accel_velocity_is_zero(const int32_t velocity_mm_s[3])
 	       (velocity_mm_s[2] == 0);
 }
 
-static void accel_zero_velocity(int32_t velocity_mm_s[3])
+static void accel_zero_xyz(int32_t xyz[3])
 {
-	velocity_mm_s[0] = 0;
-	velocity_mm_s[1] = 0;
-	velocity_mm_s[2] = 0;
+	xyz[0] = 0;
+	xyz[1] = 0;
+	xyz[2] = 0;
 }
 
 static void accel_copy_xyz(int32_t dst[3], const int32_t src[3])
@@ -192,7 +208,11 @@ static void accel_thread(void *arg1, void *arg2, void *arg3)
 
 	int32_t baseline_xyz_mg[3] = { 0 };
 	int32_t velocity_mm_s[3] = { 0 };
+	int32_t previous_xyz_mg[3] = { 0 };
+	int32_t baseline_sum_xyz_mg[3] = { 0 };
+	uint8_t baseline_sample_count = 0;
 	bool have_baseline = false;
+	bool have_previous_sample = false;
 	bool moving = false;
 	bool motion_hint_sent = false;
 	uint32_t quiet_time_ms = 0;
@@ -210,6 +230,8 @@ static void accel_thread(void *arg1, void *arg2, void *arg3)
 		uint32_t speed_mm_s;
 		bool moving_now;
 		bool motion_state_changed;
+		uint32_t sample_delta_mg;
+		bool sample_quiet;
 
 		if (ret < 0) {
 			LOG_WRN("Accelerometer read failed: %d", ret);
@@ -220,14 +242,42 @@ static void accel_thread(void *arg1, void *arg2, void *arg3)
 		if (!have_baseline) {
 			const int32_t zero_linear_xyz_mg[3] = { 0 };
 
-			accel_copy_xyz(baseline_xyz_mg, xyz_mg);
+			if (!accel_sample_is_gravity_like(xyz_mg)) {
+				baseline_sample_count = 0;
+				accel_zero_xyz(baseline_sum_xyz_mg);
+				LOG_WRN("Ignoring accelerometer startup sample with invalid gravity magnitude: %u mg",
+					accel_raw_magnitude_mg(xyz_mg));
+				k_sleep(K_MSEC(ACCEL_POLL_INTERVAL_MS));
+				continue;
+			}
+
+			for (size_t i = 0; i < 3; i++) {
+				baseline_sum_xyz_mg[i] += xyz_mg[i];
+			}
+			baseline_sample_count++;
+
+			if (baseline_sample_count < ACCEL_BASELINE_SAMPLES) {
+				k_sleep(K_MSEC(ACCEL_POLL_INTERVAL_MS));
+				continue;
+			}
+
+			for (size_t i = 0; i < 3; i++) {
+				baseline_xyz_mg[i] = baseline_sum_xyz_mg[i] /
+						     baseline_sample_count;
+			}
+
 			have_baseline = true;
+			accel_copy_xyz(previous_xyz_mg, xyz_mg);
+			have_previous_sample = true;
 			last_sample_ts_ms = now_ms;
 			rsrp_service_set_motion_hint(false, 0, 0);
 			(void)app_zbus_publish_accel_sample(false, 0, 0, 0,
 							    xyz_mg, zero_linear_xyz_mg);
 			last_zbus_publish_ts_ms = now_ms;
 			motion_hint_sent = true;
+			LOG_INF("Accelerometer baseline calibrated: xyz=(%d, %d, %d) mg, gravity=%u mg",
+				baseline_xyz_mg[0], baseline_xyz_mg[1], baseline_xyz_mg[2],
+				accel_raw_magnitude_mg(baseline_xyz_mg));
 			k_sleep(K_MSEC(ACCEL_POLL_INTERVAL_MS));
 			continue;
 		}
@@ -248,7 +298,21 @@ static void accel_thread(void *arg1, void *arg2, void *arg3)
 							       linear_xyz_mg[1],
 							       linear_xyz_mg[2]);
 
-		if (linear_accel_mg <= ACCEL_QUIET_THRESHOLD_MG) {
+		if (have_previous_sample) {
+			sample_delta_mg = accel_vector_magnitude_mg(
+				xyz_mg[0] - previous_xyz_mg[0],
+				xyz_mg[1] - previous_xyz_mg[1],
+				xyz_mg[2] - previous_xyz_mg[2]);
+		} else {
+			sample_delta_mg = 0;
+			have_previous_sample = true;
+		}
+		accel_copy_xyz(previous_xyz_mg, xyz_mg);
+
+		sample_quiet = (sample_delta_mg <= ACCEL_QUIET_THRESHOLD_MG) &&
+			       accel_sample_is_gravity_like(xyz_mg);
+
+		if (sample_quiet) {
 			if (quiet_time_ms < ACCEL_ZERO_VELOCITY_MS) {
 				uint32_t remaining_ms = ACCEL_ZERO_VELOCITY_MS - quiet_time_ms;
 
@@ -263,7 +327,7 @@ static void accel_thread(void *arg1, void *arg2, void *arg3)
 
 		if ((quiet_time_ms >= ACCEL_ZERO_VELOCITY_MS) &&
 		    !accel_velocity_is_zero(velocity_mm_s)) {
-			accel_zero_velocity(velocity_mm_s);
+			accel_zero_xyz(velocity_mm_s);
 			LOG_INF("Standstill recalibration: velocity reset after %u ms without acceleration",
 				quiet_time_ms);
 		}
@@ -271,7 +335,7 @@ static void accel_thread(void *arg1, void *arg2, void *arg3)
 		speed_mm_s = accel_vector_magnitude_mg(velocity_mm_s[0],
 							 velocity_mm_s[1],
 							 velocity_mm_s[2]);
-		moving_now = (linear_accel_mg >= ACCEL_MOVEMENT_THRESHOLD_MG) ||
+		moving_now = (!sample_quiet && (linear_accel_mg >= ACCEL_MOVEMENT_THRESHOLD_MG)) ||
 			     (speed_mm_s >= ACCEL_MOVING_SPEED_MM_S);
 
 		if (quiet_time_ms >= ACCEL_ZERO_VELOCITY_MS) {
@@ -279,12 +343,12 @@ static void accel_thread(void *arg1, void *arg2, void *arg3)
 			speed_mm_s = 0;
 		}
 
-		if ((linear_accel_mg >= ACCEL_MOVEMENT_THRESHOLD_MG) &&
+		if (!sample_quiet && (linear_accel_mg >= ACCEL_MOVEMENT_THRESHOLD_MG) &&
 		    ((last_motion_log_ts_ms == 0U) ||
 		     ((now_ms - last_motion_log_ts_ms) >= ACCEL_MOVEMENT_LOG_INTERVAL_MS))) {
 			last_motion_log_ts_ms = now_ms;
-			LOG_INF("Movement detected: accel=%u mg, speed=%u mm/s, xyz=(%d, %d, %d) mg, linear=(%d, %d, %d) mg",
-				linear_accel_mg, speed_mm_s,
+			LOG_INF("Movement detected: accel=%u mg, delta=%u mg, speed=%u mm/s, xyz=(%d, %d, %d) mg, linear=(%d, %d, %d) mg",
+				linear_accel_mg, sample_delta_mg, speed_mm_s,
 				xyz_mg[0], xyz_mg[1], xyz_mg[2],
 				linear_xyz_mg[0], linear_xyz_mg[1], linear_xyz_mg[2]);
 		}
