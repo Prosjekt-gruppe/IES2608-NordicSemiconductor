@@ -24,6 +24,7 @@ enum app_state {
     STATE_NTN_CONNECTED,
     STATE_LTEM_CONNECTING,
     STATE_LTEM_CONNECTED,
+    STATE_CLOUD_CONNECTING,
     STATE_LTE_LOCATION,
     STATE_LTE_PROBE,
     STATE_BACKOFF,
@@ -43,6 +44,9 @@ enum app_evt_type {
     EVT_LTE_POOR,
     EVT_LTE_GOOD,
     EVT_LTE_LOC_OK,
+    EVT_CLOUD_OK,
+    EVT_CLOUD_FAIL,
+    EVT_CLOUD_DISCONNECTED,
     EVT_LTE_LOC_FAIL,
     EVT_LTE_LOC_TIMEOUT,
     EVT_BACKOFF_TIMEOUT,
@@ -71,6 +75,9 @@ struct app_ctx {
     int rsrp_dbm;
     int backoff_ms;
     
+    /* cloud */
+    bool cloud_connected; 
+
     /* gnss */
     bool have_fix;
     struct nrf_modem_gnss_pvt_data_frame last_pvt;
