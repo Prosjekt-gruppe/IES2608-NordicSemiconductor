@@ -116,6 +116,14 @@ config APP_DEBUG_LTE_CONNECTING
     Allow LTE attach to complete, then stop before transistioning
     STATE_LTEM_CONNECTED
 
+config APP_DEBUG_CLOUD_CONNECTING
+  bool "Halt after cloud connection"
+  depends on APP_DEBUG
+  default n
+  help 
+    Stop after cloud connection returns success, failure or disconnect,
+    instead of continuing to later stages. 
+
 config APP_DEBUG_LTE_LOCATION
   bool "Halt after LTE location result"
   depends on APP_DEBUG

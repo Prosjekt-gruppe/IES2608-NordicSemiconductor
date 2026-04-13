@@ -1,4 +1,5 @@
 #include "location_service.h"
+#include "cloud_service.h"
 #include "app_events.h"
 
 #include <modem/location.h>
@@ -98,6 +99,11 @@ int location_service_start_lte_location(void)
     int err;
     struct location_config config;
     enum location_method methods[] = { LOCATION_METHOD_CELLULAR };
+
+    if (!cloud_service_is_connected()){
+        LOG_ERR("Cannot start cloud cellular location: cloud not connected");
+        return -ENOTCONN; 
+    }
 
     location_config_defaults_set(&config, ARRAY_SIZE(methods), methods);
 

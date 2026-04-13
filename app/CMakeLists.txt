@@ -19,6 +19,7 @@ target_sources(app PRIVATE src/main.c
     src/modules/ntn/ntn_service.c
     src/modules/rsrp/rsrp_service.c
     src/modules/location/location_service.c
+    src/modules/cloud/cloud_service.c
 )
 
 
@@ -31,6 +32,7 @@ target_include_directories(app PRIVATE
     src/modules/ntn
     src/modules/rsrp
     src/modules/location
+    src/modules/cloud
     src/modules/sensors
 )
 

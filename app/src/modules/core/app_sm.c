@@ -14,6 +14,7 @@
 #include "modem_service.h"
 #include "lte_service.h"
 #include "location_service.h"
+#include "cloud_service.h"
 
 
 #include <modem/nrf_modem_lib.h>
@@ -41,6 +42,10 @@ static void ltem_connected_entry(void *obj);
 static enum smf_state_result ltem_connected_run(void *obj);
 static void ltem_connected_exit(void *obj); 
 
+static void cloud_connecting_entry(void *obj); 
+static enum smf_state_result cloud_connecting_run(void *obj); 
+static void cloud_connecting_exit(void *obj);
+
 static void lte_location_entry(void *obj); 
 static enum smf_state_result lte_location_run(void *obj); 
 static void lte_location_exit(void *obj);
@@ -64,9 +69,7 @@ static void ntn_connected_exit(void *obj);
 static void lte_probe_entry(void *obj);
 static enum smf_state_result lte_probe_run(void *obj);
 
-
 static void handle_gnss_status(struct app_ctx *ctx, const struct app_gnss_status *status);
-
 
 static void dispatch_app_event(struct app_ctx *ctx, const struct app_event *ev);
 static void backoff_timer_handler(struct k_timer *timer);
@@ -97,6 +100,13 @@ static const struct smf_state states[] = {
         ltem_connected_entry,
         ltem_connected_run,
         ltem_connected_exit,
+        NULL,
+        NULL
+    ),
+    [STATE_CLOUD_CONNECTING] = SMF_CREATE_STATE(
+        cloud_connecting_entry,
+        cloud_connecting_run,
+        cloud_connecting_exit,
         NULL,
         NULL
     ),
@@ -172,6 +182,12 @@ static void boot_entry(void *obj)
     if (err){
         LOG_ERR("lte_service_init err=%d", err); 
         return; 
+    }
+    
+    err = cloud_service_init();
+    if (err){
+        LOG_ERR("cloud_service_init err=%d", err);
+        return;
     }
 
     err = location_service_init();
@@ -314,8 +330,8 @@ static void ltem_connected_entry(void *obj)
 #endif
 
     LOG_INF("ltem_connected_entry ok");
-    LOG_INF("STATE_LTEM_CONNECTED --> STATE_LTE_LOCATION");
-    smf_set_state(SMF_CTX(ctx), &states[STATE_LTE_LOCATION]);
+    LOG_INF("STATE_LTEM_CONNECTED --> STATE_CLOUD_CONNECTING");
+    smf_set_state(SMF_CTX(ctx), &states[STATE_CLOUD_CONNECTING]);
 
 }
 
@@ -362,6 +378,78 @@ static void ltem_connected_exit(void *obj)
     ctx->lte_connected = false;
     */
 }
+
+
+
+static void cloud_connecting_entry(void *obj)
+{
+    struct app_ctx *ctx = obj;
+    int err; 
+
+    ctx->cloud_connected = false; 
+
+    err = cloud_service_connect_async();
+    if (err){
+        LOG_ERR("cloud_service_connect_async err=%d", err); 
+        (void)app_event_publish_type(EVT_CLOUD_FAIL);
+        return;
+    }
+
+    LOG_INF("Cloud connecting...");
+}
+
+static enum smf_state_result cloud_connecting_run(void *obj)
+{
+    struct app_ctx *ctx = obj;
+
+    switch(ctx->ev.type){
+        case EVT_CLOUD_OK:
+            ctx->cloud_connected = true; 
+            LOG_INF("Cloud connected"); 
+
+            if (IS_ENABLED(CONFIG_APP_DEBUG_CLOUD_CONNECTING)){
+                LOG_INF("DEBUG: Halting after cloud connect success"); 
+                smf_set_state(SMF_CTX(ctx), &states[STATE_IDLE]);
+            } else {
+                smf_set_state(SMF_CTX(ctx), &states[STATE_LTE_LOCATION]);
+            }
+            return SMF_EVENT_HANDLED;
+
+        case EVT_CLOUD_FAIL: 
+            ctx->cloud_connected = false; 
+            LOG_WRN("Cloud connection failed");
+
+            if (IS_ENABLED(CONFIG_APP_DEBUG_CLOUD_CONNECTING)){
+                LOG_INF("DEBUG: Halting after cloud connect failure");
+                smf_set_state(SMF_CTX(ctx), &states[STATE_IDLE]);
+            } else {
+                smf_set_state(SMF_CTX(ctx), &states[STATE_IDLE]);
+            }
+            return SMF_EVENT_HANDLED;
+
+        case EVT_CLOUD_DISCONNECTED:
+            ctx->cloud_connected = false; 
+            LOG_WRN("Cloud disconnected while connecting");
+            if(IS_ENABLED(CONFIG_APP_DEBUG_CLOUD_CONNECTING)){
+                LOG_INF("DEBUG: Halting after cloud disconnect");
+                smf_set_state(SMF_CTX(ctx), &states[STATE_IDLE]);
+            } else {
+                smf_set_state(SMF_CTX(ctx), &states[STATE_IDLE]);
+            }
+            return SMF_EVENT_HANDLED;
+        
+        default:
+            return SMF_EVENT_HANDLED;
+    }
+}
+
+static void cloud_connecting_exit(void *obj)
+{
+    ARG_UNUSED(obj);
+    LOG_INF("cloud connecting exit"); 
+}
+
+
 
 static void lte_location_entry(void *obj)
 {
