@@ -30,11 +30,8 @@ target_include_directories(app PRIVATE
     src/modules/modem
     src/modules/ntn
     src/modules/rsrp
-<<<<<<< HEAD
     src/modules/location
-=======
     src/modules/sensors
->>>>>>> origin/main
 )
 
 if(CONFIG_APP_SENSOR_ACCEL_DEMO)

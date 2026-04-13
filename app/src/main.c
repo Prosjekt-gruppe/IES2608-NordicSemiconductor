@@ -22,13 +22,11 @@
 #include "app_types.h"
 #include "app_events.h"
 #include "app_sm.h"
-<<<<<<< HEAD
-//#include "accel.h"
-=======
+
+
 #if defined(CONFIG_APP_SENSOR_ACCEL_DEMO)
 #include "accel.h"
 #endif
->>>>>>> origin/main
 
 
 LOG_MODULE_REGISTER(app, LOG_LEVEL_INF);
@@ -46,20 +44,7 @@ int main(void)
 
     app_event_put(&boot, K_NO_WAIT);
 
-<<<<<<< HEAD
-
-    //accel_start();
-    
-    
-    //k_msgq_put(&app_evt_q, &boot, K_NO_WAIT);
-
-    //k_thread_create(&mon_thread_data, mon_stack, MON_STACK_SIZE,
-    //    monitor_thread, NULL, NULL, NULL, MON_PRIORITY, 0, K_NO_WAIT);
-
-    //smf_set_initial(SMF_CTX(&ctx), &states[STATE_IDLE]);
-=======
     LOG_INF("Firmware version: %s", APP_VERSION_STRING);
->>>>>>> origin/main
 
 #if defined(CONFIG_APP_SENSOR_ACCEL_DEMO)
     accel_start();

@@ -47,12 +47,7 @@ static void lte_location_exit(void *obj);
 
 static void backoff_entry(void *obj);
 static enum smf_state_result backoff_run(void *obj);
-<<<<<<< HEAD
 static void backoff_exit(void *obj);
-
-=======
-static void backoff_exit(void * obj);
->>>>>>> origin/main
 
 static void gnss_acquire_entry(void *obj);
 static enum smf_state_result gnss_acquire_run(void *obj);
@@ -104,7 +99,6 @@ static const struct smf_state states[] = {
         ltem_connected_exit,
         NULL,
         NULL
-<<<<<<< HEAD
     ),
     [STATE_LTE_LOCATION] = SMF_CREATE_STATE(
         lte_location_entry,
@@ -113,9 +107,6 @@ static const struct smf_state states[] = {
         NULL,
         NULL
     ),
-=======
-    ),    
->>>>>>> origin/main
     [STATE_GNSS_ACQUIRE] = SMF_CREATE_STATE(
         gnss_acquire_entry,
         gnss_acquire_run,
@@ -300,14 +291,11 @@ static void ltem_connected_entry(void *obj)
     } else {
         LOG_WRN("Could not read LTE RSRP: %d", err);
     }
-<<<<<<< HEAD
 
     /*
     err = rsrp_service_start();
-=======
     
     err = rsrp_service_start_monitor();
->>>>>>> origin/main
     if (err < 0) {
     LOG_WRN("Failed to start LTE signal monitor: %d", err);
     }
@@ -372,7 +360,6 @@ static void ltem_connected_exit(void *obj)
         LOG_WRN("Failed to stop LTE signal monitor: %d", err);
     }
     ctx->lte_connected = false;
-<<<<<<< HEAD
     */
 }
 
@@ -449,14 +436,12 @@ static void lte_location_exit(void *obj)
 
     LOG_INF("lte location exit");
 }
-=======
 
 #if defined(CONFIG_APP_CORE_SM_PROBE_TEST)
     k_timer_stop(&ctx->lte_timer);
 #endif
-}
 
->>>>>>> origin/main
+
 
 
 //#if 0
