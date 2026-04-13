@@ -5,6 +5,7 @@
  */
 
 #include "batt.h"
+#include "app_zbus.h"
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -159,6 +160,9 @@ static void batt_thread(void *arg1, void *arg2, void *arg3)
 		if (ret < 0) {
 			LOG_WRN("Battery read failed: %d", ret);
 		} else {
+			(void)app_zbus_publish_battery_sample(voltage_mv, current_ma,
+							      temp_mdegc, status,
+							      error, vbus_present);
 			LOG_INF("Battery: %lld mV (%s), %s, %s, current=%lld mA, temp=%lld.%03lld C, err=%d",
 				voltage_mv,
 				batt_level_string(voltage_mv),
