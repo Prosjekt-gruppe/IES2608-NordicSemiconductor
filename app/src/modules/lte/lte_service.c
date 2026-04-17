@@ -17,18 +17,9 @@
 LOG_MODULE_REGISTER(lte_service, LOG_LEVEL_INF);
 
 static bool lte_connected; 
+static bool probe_pending;
 
-/*
-static int publish_evt(enum app_evt_type type)
-{
-    struct app_event ev = {
-        .type = type,
-    };
 
-    LOG_INF("Publishing %s", app_evt_name(type));
-    return app_event_put(&ev, K_NO_WAIT); 
-}
-*/
 static void lte_lc_evt_handler(const struct lte_lc_evt *const evt)
 {
     switch (evt->type) {
@@ -40,8 +31,15 @@ static void lte_lc_evt_handler(const struct lte_lc_evt *const evt)
         case LTE_LC_NW_REG_REGISTERED_HOME:
         case LTE_LC_NW_REG_REGISTERED_ROAMING:
             lte_connected=true;
+
+            if (probe_pending) {
+                probe_pending = false;
+                (void)app_event_publish_type(EVT_TN_READY_FOR_PROBE);
+            } else {
+                (void)app_event_publish_type(EVT_REG_OK);
+            }
+
             LOG_INF("LTE registered on network");
-            (void)app_event_publish_type(EVT_REG_OK);
             break;
 
         case LTE_LC_NW_REG_NOT_REGISTERED:
@@ -74,8 +72,14 @@ static void lte_lc_evt_handler(const struct lte_lc_evt *const evt)
 
 int lte_service_init(void)
 {
-    lte_connected = false; 
+    lte_connected = false;
+    probe_pending = false;
     return 0; 
+}
+
+void lte_service_set_probe_pending(bool enable)
+{
+    probe_pending = enable;
 }
 
 int lte_service_connect_async(void)

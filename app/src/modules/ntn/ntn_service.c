@@ -6,6 +6,8 @@
 #include "ntn_service.h"
 #include "app_events.h"
 
+#include "modem_service.h"
+
 #include <modem/lte_lc.h>
 #include <modem/ntn.h>
 #include <zephyr/kernel.h>
@@ -13,16 +15,10 @@
 
 LOG_MODULE_REGISTER(ntn_service, LOG_LEVEL_INF);
 
-/*
-static int publish_evt(enum app_evt_type type)
-{
-    struct app_event ev = {
-        .type = type, 
-    };
-    LOG_INF("Publishing %s", app_evt_name(type)); 
-    return app_event_put(&ev, K_NO_WAIT); 
-}
-*/
+
+
+static bool initialized;
+
 
 static void ntn_lc_evt_handler(const struct lte_lc_evt *const evt)
 {
@@ -98,13 +94,35 @@ static int ntn_service_prepare(struct app_ctx *ctx)
         .uicc = LTE_LC_UICC_PHYSICAL,
     };
 
+    /*
+    struct lte_lc_cellular_profile tn_profile = {
+        .id = 1,
+        .act = LTE_LC_ACT_LTEM || LTE_LC_ACT_NBIOT,
+        .uicc = LTE_LC_UICC_PHYSICAL,
+    };
+    */
+
+    struct lte_lc_cellular_profile tn_profile = {
+        .id = 1,
+        .act = LTE_LC_ACT_NBIOT,
+        .uicc = LTE_LC_UICC_PHYSICAL,
+    };
+
+
     if (!ctx->ntn_initialized) {
         err = lte_lc_power_off();
         if (err) {
             return err;
         }
 
+        /* setup NTN profile */
         err = lte_lc_cellular_profile_configure(&ntn_profile);
+        if (err) {
+            return err;
+        }
+
+        /* setup TN profile */
+        err = lte_lc_cellular_profile_configure(&tn_profile);
         if (err) {
             return err;
         }
@@ -112,6 +130,7 @@ static int ntn_service_prepare(struct app_ctx *ctx)
         ctx->ntn_initialized = true;
     }
 
+    /* simple set location */
     if (ctx->have_fix) {
         err = ntn_location_set((double)ctx->last_pvt.latitude,
                                (double)ctx->last_pvt.longitude,
@@ -131,10 +150,26 @@ static int ntn_service_prepare(struct app_ctx *ctx)
     return 0;
 }
 
+int ntn_service_init(void)
+{
+    if (initialized) {
+        return 0;
+    }
+
+    initialized = true;
+    return 0;
+}
+
 /* simple connect attempt */
 int ntn_service_connect(struct app_ctx *ctx)
 {
     int err;
+
+    LOG_INF("hello from ntn_service_connect");
+
+    if (!initialized) {
+        return -EINVAL;
+    }
 
     err = ntn_service_prepare(ctx);
     if (err) {
@@ -143,10 +178,14 @@ int ntn_service_connect(struct app_ctx *ctx)
     
 /* verbose modem */
 #ifndef CONFIG_APP_DEBUG_NTN
-    cereg_notification_enable();
+    err = cereg_notification_enable();
+    if (err) {
+        return err;
+    }
 #endif
 
+    /* start modem */
     return lte_lc_connect_async(ntn_lc_evt_handler);
-
-
 }
+
+

@@ -52,6 +52,9 @@ enum app_evt_type {
     EVT_BACKOFF_TIMEOUT,
     EVT_PDN_UP,
     EVT_PDN_DOWN,
+    EVT_MODEM_SWITCH_FAIL,
+    EVT_MODEM_SWITCH_CMD_OK,
+    EVT_TN_READY_FOR_PROBE,
 };
 
 struct app_event {

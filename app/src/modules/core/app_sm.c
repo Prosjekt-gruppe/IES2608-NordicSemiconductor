@@ -77,10 +77,6 @@ static void ntn_timer_handler(struct k_timer *timer);
 static void ltem_timer_handler(struct k_timer *timer);
 
 
-static void ntn_timer_handler(struct k_timer *timer);
-static void ltem_timer_handler(struct k_timer *timer);
-
-
 static const struct smf_state states[] = {
     [STATE_BOOT] = SMF_CREATE_STATE(
         boot_entry,
@@ -202,6 +198,12 @@ static void boot_entry(void *obj)
         return; 
     }
 
+    err = ntn_service_init();
+    if (err){
+        LOG_ERR("ntn_service_init err=%d", err); 
+        return; 
+    }
+
     /*
     err = gnss_service_init();
     if (err) {
@@ -224,14 +226,13 @@ static enum smf_state_result boot_run(void *obj)
     struct app_ctx *ctx = obj;
     
     if (ctx->ev.type == EVT_BOOT) {
-        if (IS_ENABLED(CONFIG_APP_DEBUG_BOOT)){
-            LOG_INF("DEBUG: Halting in STATE_BOOT after initialization");  
-    } else 
-    {
-        smf_set_state(SMF_CTX(ctx), &states[STATE_LTEM_CONNECTING]);
+        if (IS_ENABLED(CONFIG_APP_DEBUG_BOOT)) {
+            LOG_INF("DEBUG: Halting in STATE_BOOT after initialization");
+        } else {
+            smf_set_state(SMF_CTX(ctx), &states[STATE_LTEM_CONNECTING]);
+        }
     }
-}
-return SMF_EVENT_HANDLED;
+    return SMF_EVENT_HANDLED;
 }
 
 static void ltem_connecting_entry(void *obj)
@@ -325,10 +326,15 @@ static void ltem_connected_entry(void *obj)
     k_timer_start(&ctx->lte_timer, K_MSEC(3000), K_NO_WAIT);
 #endif
 
-    LOG_INF("ltem_connected_entry ok");
+/*
+ * TODO(?): should probably be implemented into ltem_connected_run ?
+ */
+#if defined(CONFIG_APP_DEBUG_LTE_CONNECTING)
     LOG_INF("STATE_LTEM_CONNECTED --> STATE_CLOUD_CONNECTING");
     smf_set_state(SMF_CTX(ctx), &states[STATE_CLOUD_CONNECTING]);
+#endif
 
+    LOG_INF("ltem_connected_entry ok");
 }
 
 static enum smf_state_result ltem_connected_run(void *obj)
@@ -349,10 +355,12 @@ static enum smf_state_result ltem_connected_run(void *obj)
         smf_set_state(SMF_CTX(ctx), &states[STATE_BACKOFF]);
         return SMF_EVENT_HANDLED;
     
+/* force EVT_LTE_POOR (usually should be disabled) */
 #if defined(CONFIG_APP_CORE_SM_PROBE_TEST)
     case EVT_TIMEOUT:
-        LOG_INF("going to state ntn connected state");
-        smf_set_state(SMF_CTX(ctx), &states[STATE_NTN_CONNECTED]);
+        ctx->next_rat = RAT_NTN;
+        LOG_INF("manual force test going to STATE_BACKOFF");
+        smf_set_state(SMF_CTX(ctx), &states[STATE_BACKOFF]);
         return SMF_EVENT_HANDLED;
 #endif
 
@@ -365,14 +373,21 @@ static void ltem_connected_exit(void *obj)
 {
     ARG_UNUSED(obj);
 
-    /*
+    
     struct app_ctx *ctx = obj;
     int err = rsrp_service_stop();
     if (err) {
         LOG_WRN("Failed to stop LTE signal monitor: %d", err);
     }
+
+    err = lte_service_disconnect();
+    if (err) {
+        LOG_WRN("lte_service_disconnect failed: %d", err);
+    }
     ctx->lte_connected = false;
-    */
+    
+    LOG_INF("lte_service_disconnect -> %d", err);
+    
 }
 
 
@@ -519,22 +534,31 @@ static void lte_location_exit(void *obj)
     }
 
     LOG_INF("lte location exit");
+    
+    /*
+    #if defined(CONFIG_APP_CORE_SM_PROBE_TEST)
+        k_timer_stop(&ctx->lte_timer);
+    #endif
+    */
 }
 
-#if defined(CONFIG_APP_CORE_SM_PROBE_TEST)
-    k_timer_stop(&ctx->lte_timer);
-#endif
 
 
-
-
-//#if 0
 static void gnss_acquire_entry(void *obj)
 {
     ARG_UNUSED(obj);
 
+    /*
     (void)gnss_service_start_timeout(CONFIG_APP_GNSS_TIMEOUT_SEC);
     (void)gnss_service_start();
+    */
+
+    LOG_INF("Forcing GNSS timeout path for NTN test");
+
+    struct app_event ev = {
+        .type = EVT_GNSS_TIMEOUT
+    };
+    (void)app_event_put(&ev, K_NO_WAIT);
 
     LOG_INF("(%s) GNSS_ACQUIRE entry done", __func__);
 }
@@ -546,6 +570,7 @@ static enum smf_state_result gnss_acquire_run(void *obj)
     LOG_INF("entering (%s)", __func__);
 
     switch (ctx->ev.type) {
+    /*
     case EVT_GNSS_FIX:
         ctx->last_pvt = ctx->ev.pvt;
         ctx->have_fix = true;
@@ -557,10 +582,11 @@ static enum smf_state_result gnss_acquire_run(void *obj)
         (void)gnss_service_stop();
         smf_set_state(SMF_CTX(ctx), &states[STATE_NTN_CONNECTING]);
         return SMF_EVENT_HANDLED;
+    */
 
     case EVT_GNSS_TIMEOUT:
         LOG_INF("GNSS_ACQUIRE: gnss timeout");
-        (void)gnss_service_stop();
+        //(void)gnss_service_stop();
 
         /* ONLY FOR TESTING NTN */
         ctx->last_pvt.latitude = 63.4305;
@@ -584,7 +610,9 @@ static void gnss_acquire_exit(void *obj)
 {
     ARG_UNUSED(obj);
 
-    (void)gnss_service_cancel_timeout();
+
+
+    //(void)gnss_service_cancel_timeout();
     LOG_INF("gnss acquire exit");
 }
 
@@ -613,7 +641,7 @@ static enum smf_state_result ntn_connecting_run(void *obj)
         LOG_INF("ntn registered ok");
         
         ctx->active_rat = RAT_NTN;
-        smf_set_state(SMF_CTX(ctx), &states[STATE_IDLE]);
+        //smf_set_state(SMF_CTX(ctx), &states[STATE_NTN_CONNECTED]);
         return SMF_EVENT_HANDLED;
     
     case EVT_PDN_UP:
@@ -623,13 +651,12 @@ static enum smf_state_result ntn_connecting_run(void *obj)
         return SMF_EVENT_HANDLED;
 
     case EVT_REG_FAIL:
-        LOG_INF("ntn register failed");
-        smf_set_state(SMF_CTX(ctx), &states[STATE_BACKOFF]);
-        return SMF_EVENT_HANDLED;
-
-    //case EVT_NTN_REG_FAIL:
+    case EVT_PDN_DOWN:
     case EVT_NTN_TIMEOUT:
         LOG_INF("ntn connect failed/timeout");
+
+        ctx->pdn_up=false;
+        
         smf_set_state(SMF_CTX(ctx), &states[STATE_BACKOFF]);
         return SMF_EVENT_HANDLED;
 
@@ -665,7 +692,7 @@ static void ntn_connected_entry(void *obj)
 
 #if defined(CONFIG_APP_CORE_SM_PROBE_TEST)
     LOG_INF("Starting ntn connected timer");
-    int32_t delay_ms = 3000;
+    int32_t delay_ms = 100000;
     k_timer_start(&ctx->ntn_timer,
                   K_MSEC(delay_ms),
                   K_NO_WAIT);
@@ -744,13 +771,25 @@ static void handle_gnss_status(struct app_ctx *ctx, const struct app_gnss_status
     
 static void lte_probe_entry(void *obj)
 {
+    //ARG_UNUSED(obj);
+    int err;
+
     struct app_ctx *ctx = obj;
-
-    ctx->active_rat = RAT_LTEM;
-    ctx->lte_connected = true;
-
-    (void)rsrp_service_start_probe(3);
     
+    //(void)rsrp_service_start_probe(3);
+    
+    /* enable lte-service probe event on rsrp */
+    lte_service_set_probe_pending(true);
+    
+    /* switch to tn network */
+    err = modem_service_switch_to_tn();
+    if (err) {
+        LOG_INF("switch to tn lte probe fault");
+        lte_service_set_probe_pending(false);
+        smf_set_state(SMF_CTX(ctx), &states[STATE_NTN_CONNECTED]);
+        return;
+    }
+
     LOG_INF("lte_probe_entry");
 }
 
@@ -766,13 +805,42 @@ static enum smf_state_result lte_probe_run(void *obj)
         
     case EVT_LTE_POOR:
         LOG_INF("LTE probe: TN still bad -> staying on NTN");
+
+        modem_service_switch_to_ntn();
+
         smf_set_state(SMF_CTX(ctx), &states[STATE_NTN_CONNECTED]);
         return SMF_EVENT_HANDLED;
 
     case EVT_LTE_GOOD:
-        LOG_INF("LTE probe: TN good -> connecting to LTE");
+        int err;
+        
+        LOG_INF("LTE probe: TN good -> UDP test");
+        
+    
+        err = modem_service_udp_send_test();
+        
+        if (err) {
+            LOG_ERR("UDP test failed: %d", err);
+            
+            modem_service_switch_to_ntn();
+            smf_set_state(SMF_CTX(ctx), &states[STATE_NTN_CONNECTED]);
+            return SMF_EVENT_HANDLED;
+        }
+    
+        LOG_INF("UDP TEST OK");
+    
+    
         /* should probably go to LTEM_CONNECTING/CONNECTED but for this test its ok */
-        smf_set_state(SMF_CTX(ctx), &states[STATE_IDLE]);
+        ctx->next_rat = RAT_LTEM;
+        smf_set_state(SMF_CTX(ctx), &states[STATE_LTEM_CONNECTED]);
+        return SMF_EVENT_HANDLED;
+
+    case EVT_TN_READY_FOR_PROBE:
+        LOG_INF("something");
+
+        /* start rsrp probe */
+        rsrp_service_start_probe(3);
+
         return SMF_EVENT_HANDLED;
 
     default:
@@ -844,7 +912,7 @@ static void backoff_exit(void *obj)
 {
     struct app_ctx *ctx = obj;
 
-    LOG_INF("Entering backoff");
+    LOG_INF("backoff exit");
     k_timer_stop(&ctx->backoff_timer);
 }
 
