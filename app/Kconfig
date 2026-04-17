@@ -56,6 +56,16 @@ config APP_MODEM_RSRP_DROP_DB
       Minimum drop in dB used by the modem service when deciding that the
       LTE-M signal is degrading toward an NTN fallback.
 
+config APP_MODEM_RSRP_LOSS_SAMPLE_COUNT
+    int "Unavailable LTE-M RSRP samples before NTN fallback"
+    default 3
+    range 1 20
+    help
+      Number of consecutive failed or unknown RSRP samples needed before the
+      modem service treats LTE-M as lost and requests NTN fallback. This avoids
+      switching RAT because of one temporary AT command or modem measurement
+      failure.
+
 config APP_SENSOR_ACCEL_DEMO
     bool "Enable accelerometer demo"
     default y if BOARD_THINGY91X_NRF9151_NS

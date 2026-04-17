@@ -31,6 +31,7 @@ LOG_MODULE_REGISTER(rsrp_service, LOG_LEVEL_INF);
 /*----- Defines ---------*/
 #define RSRP_HISTORY_LEN 6
 #define PROBE_POLL_MSEC 500
+#define RSRP_UNKNOWN_DBM CONFIG_APP_MODEM_RSRP_FALLBACK_DBM
 
 /* service internal state control */
 enum rsrp_mode {
@@ -57,6 +58,7 @@ static uint32_t current_poll_interval_sec = CONFIG_APP_MODEM_SIGNAL_POLL_INTERVA
 static int rsrp_hist[RSRP_HISTORY_LEN];
 static uint8_t rsrp_hist_idx;
 static uint8_t rsrp_hist_count;
+static uint8_t rsrp_unavailable_count;
 
 
 /*---- Functions -------*/
@@ -65,6 +67,7 @@ static void reset_signal_tracking(void)
     last_rsrp_dbm = INT32_MIN;
     rsrp_hist_idx = 0U;
     rsrp_hist_count = 0U;
+    rsrp_unavailable_count = 0U;
     fallback_requested = false;
 }
 
@@ -169,6 +172,34 @@ static bool should_publish_lte_poor(int rsrp_dbm)
     return weak_signal && (sharp_drop || worsening);
 }
 
+static void record_rsrp_available(void)
+{
+    rsrp_unavailable_count = 0U;
+}
+
+static uint8_t record_rsrp_unavailable(void)
+{
+    if (rsrp_unavailable_count < UINT8_MAX) {
+        rsrp_unavailable_count++;
+    }
+
+    return rsrp_unavailable_count;
+}
+
+static int rsrp_event_value_for_unavailable(void)
+{
+    if ((last_rsrp_dbm != INT32_MIN) && (last_rsrp_dbm < RSRP_UNKNOWN_DBM)) {
+        return last_rsrp_dbm;
+    }
+
+    return RSRP_UNKNOWN_DBM;
+}
+
+static bool rsrp_unavailable_limit_reached(void)
+{
+    return rsrp_unavailable_count >= CONFIG_APP_MODEM_RSRP_LOSS_SAMPLE_COUNT;
+}
+
 
 static void rsrp_work_handler(struct k_work *work)
 {
@@ -182,13 +213,33 @@ static void rsrp_work_handler(struct k_work *work)
         /* get rsrp info from modem */
         err = rsrp_service_get(&rsrp_dbm);
         if (err) {
-            LOG_WRN("rsrp_service_get failed: %d", err);
+            (void)record_rsrp_unavailable();
             current_poll_interval_sec = rsrp_target_poll_interval_sec();
+
+            LOG_WRN("LTE-M RSRP unavailable: err=%d, count=%u/%u, next=%u s",
+                    err,
+                    (unsigned int)rsrp_unavailable_count,
+                    (unsigned int)CONFIG_APP_MODEM_RSRP_LOSS_SAMPLE_COUNT,
+                    current_poll_interval_sec);
+
+            if (!fallback_requested && rsrp_unavailable_limit_reached()) {
+                fallback_requested = true;
+                mode = RSRP_MODE_IDLE;
+
+                rsrp_dbm = rsrp_event_value_for_unavailable();
+
+                LOG_WRN("LTE-M RSRP unavailable for %u samples, publishing LTE poor event",
+                        (unsigned int)rsrp_unavailable_count);
+                (void)publish_rsrp_event(EVT_LTE_POOR, rsrp_dbm);
+                return;
+            }
+
             (void)k_work_reschedule(&rsrp_work,
                                     K_SECONDS(current_poll_interval_sec));
             return;
         }
     
+        record_rsrp_available();
         current_poll_interval_sec = rsrp_target_poll_interval_sec();
         LOG_INF("LTE-M RSRP: %d dBm, next=%u s, motion=%s, speed=%u mm/s, accel=%u mg",
                 rsrp_dbm,
@@ -219,11 +270,28 @@ static void rsrp_work_handler(struct k_work *work)
     
         err = rsrp_service_get(&rsrp_dbm);
         if (err) {
-            LOG_WRN("rsrp_service_get failed during probe: %d", err);
+            (void)record_rsrp_unavailable();
+
+            LOG_WRN("LTE probe RSRP unavailable: err=%d, count=%u/%u",
+                    err,
+                    (unsigned int)rsrp_unavailable_count,
+                    (unsigned int)CONFIG_APP_MODEM_RSRP_LOSS_SAMPLE_COUNT);
+
+            if (rsrp_unavailable_limit_reached()) {
+                rsrp_dbm = rsrp_event_value_for_unavailable();
+
+                LOG_WRN("LTE probe failed because RSRP stayed unavailable");
+                (void)publish_rsrp_event(EVT_LTE_POOR, rsrp_dbm);
+                mode = RSRP_MODE_IDLE;
+                return;
+            }
+
             (void)k_work_reschedule(&rsrp_work, K_MSEC(PROBE_POLL_MSEC));
             return;
         }
     
+        record_rsrp_available();
+
         /* store sample in ring buffer */
         rsrp_hist[rsrp_hist_idx] = rsrp_dbm;
         rsrp_hist_idx = (rsrp_hist_idx + 1U) % RSRP_HISTORY_LEN;
