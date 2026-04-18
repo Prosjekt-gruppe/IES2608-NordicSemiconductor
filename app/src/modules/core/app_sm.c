@@ -198,19 +198,18 @@ static void boot_entry(void *obj)
         return; 
     }
 
+    err = gnss_service_init();
+    if (err) {
+        LOG_ERR("gnss_service_init err=%d", err);
+        return;
+    }
+
     err = ntn_service_init();
     if (err){
         LOG_ERR("ntn_service_init err=%d", err); 
         return; 
     }
 
-    /*
-    err = gnss_service_init();
-    if (err) {
-        LOG_ERR("gnss_service_init err=%d", err);
-        return;
-    }
-    */
 
     /* init timers */
     k_timer_init(&ctx->backoff_timer, backoff_timer_handler, NULL);
@@ -371,10 +370,13 @@ static enum smf_state_result ltem_connected_run(void *obj)
 
 static void ltem_connected_exit(void *obj)
 {
-    ARG_UNUSED(obj);
-
-    
     struct app_ctx *ctx = obj;
+
+#if defined(CONFIG_APP_CORE_SM_PROBE_TEST)
+    LOG_INF("ltem timer stop");
+    k_timer_stop(&ctx->lte_timer);
+#endif
+   
     int err = rsrp_service_stop();
     if (err) {
         LOG_WRN("Failed to stop LTE signal monitor: %d", err);
@@ -548,10 +550,10 @@ static void gnss_acquire_entry(void *obj)
 {
     ARG_UNUSED(obj);
 
-    /*
+    
     (void)gnss_service_start_timeout(CONFIG_APP_GNSS_TIMEOUT_SEC);
     (void)gnss_service_start();
-    */
+    
 
     LOG_INF("Forcing GNSS timeout path for NTN test");
 
@@ -570,7 +572,7 @@ static enum smf_state_result gnss_acquire_run(void *obj)
     LOG_INF("entering (%s)", __func__);
 
     switch (ctx->ev.type) {
-    /*
+    
     case EVT_GNSS_FIX:
         ctx->last_pvt = ctx->ev.pvt;
         ctx->have_fix = true;
@@ -582,16 +584,16 @@ static enum smf_state_result gnss_acquire_run(void *obj)
         (void)gnss_service_stop();
         smf_set_state(SMF_CTX(ctx), &states[STATE_NTN_CONNECTING]);
         return SMF_EVENT_HANDLED;
-    */
+    
 
     case EVT_GNSS_TIMEOUT:
         LOG_INF("GNSS_ACQUIRE: gnss timeout");
-        //(void)gnss_service_stop();
+        (void)gnss_service_stop();
 
         /* ONLY FOR TESTING NTN */
-        ctx->last_pvt.latitude = 63.4305;
-        ctx->last_pvt.longitude = 10.3951;
-        ctx->last_pvt.altitude = 10;
+        ctx->last_pvt.latitude = 63.2635;
+        ctx->last_pvt.longitude = 10.2654;
+        ctx->last_pvt.altitude = 40;
 
         ctx->have_fix = true;
 
@@ -612,7 +614,7 @@ static void gnss_acquire_exit(void *obj)
 
 
 
-    //(void)gnss_service_cancel_timeout();
+    (void)gnss_service_cancel_timeout();
     LOG_INF("gnss acquire exit");
 }
 
@@ -690,9 +692,10 @@ static void ntn_connected_entry(void *obj)
     LOG_INF("UDP test send result: %d", err);
 #endif
 
+/* force lte probe check */
 #if defined(CONFIG_APP_CORE_SM_PROBE_TEST)
     LOG_INF("Starting ntn connected timer");
-    int32_t delay_ms = 100000;
+    int32_t delay_ms = 50000;
     k_timer_start(&ctx->ntn_timer,
                   K_MSEC(delay_ms),
                   K_NO_WAIT);
@@ -795,9 +798,9 @@ static void lte_probe_entry(void *obj)
 
 static enum smf_state_result lte_probe_run(void *obj)
 {
-    LOG_INF("lte_probe_run");
+    int err;
     struct app_ctx *ctx = obj;
-
+    
     switch(ctx->ev.type) {
     case EVT_RSRP_UPDATE:
         LOG_INF("received rsrp update event");
@@ -806,17 +809,17 @@ static enum smf_state_result lte_probe_run(void *obj)
     case EVT_LTE_POOR:
         LOG_INF("LTE probe: TN still bad -> staying on NTN");
 
+        /* return to NTN */
         modem_service_switch_to_ntn();
 
         smf_set_state(SMF_CTX(ctx), &states[STATE_NTN_CONNECTED]);
         return SMF_EVENT_HANDLED;
 
     case EVT_LTE_GOOD:
-        int err;
-        
+
         LOG_INF("LTE probe: TN good -> UDP test");
         
-    
+        /* send udp */
         err = modem_service_udp_send_test();
         
         if (err) {
@@ -839,7 +842,12 @@ static enum smf_state_result lte_probe_run(void *obj)
         LOG_INF("something");
 
         /* start rsrp probe */
-        rsrp_service_start_probe(3);
+        err = rsrp_service_start_probe(3);
+        if (err < 0) {
+            LOG_ERR("rsrp_service_start_probe failed: %d", err);
+            modem_service_switch_to_ntn();
+            smf_set_state(SMF_CTX(ctx), &states[STATE_NTN_CONNECTED]);
+        }
 
         return SMF_EVENT_HANDLED;
 

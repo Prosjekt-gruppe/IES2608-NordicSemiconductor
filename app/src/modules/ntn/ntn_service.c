@@ -15,15 +15,10 @@
 
 LOG_MODULE_REGISTER(ntn_service, LOG_LEVEL_INF);
 
-
-
 static bool initialized;
 
-
 static void ntn_lc_evt_handler(const struct lte_lc_evt *const evt)
-{
-    //struct app_event app_ev = {0};
-    
+{    
     switch (evt->type) {
     case LTE_LC_EVT_NW_REG_STATUS:
         LOG_INF("NTN NW registration status: %d", evt->nw_reg_status);
@@ -53,14 +48,12 @@ static void ntn_lc_evt_handler(const struct lte_lc_evt *const evt)
 
         case LTE_LC_EVT_PDN_ACTIVATED:
             LOG_INF("NTN: PDN activated");
-            //app_ev.type = EVT_PDN_UP;
             (void)app_event_publish_type(EVT_PDN_UP);
             break;
 
         case LTE_LC_EVT_PDN_DEACTIVATED:
         case LTE_LC_EVT_PDN_NETWORK_DETACH:
             LOG_INF("NTN: PDN down");
-            //app_ev.type = EVT_PDN_DOWN;
             (void)app_event_publish_type(EVT_PDN_DOWN);
             break;
 
@@ -104,7 +97,7 @@ static int ntn_service_prepare(struct app_ctx *ctx)
 
     struct lte_lc_cellular_profile tn_profile = {
         .id = 1,
-        .act = LTE_LC_ACT_NBIOT,
+        .act = LTE_LC_ACT_LTEM,
         .uicc = LTE_LC_UICC_PHYSICAL,
     };
 

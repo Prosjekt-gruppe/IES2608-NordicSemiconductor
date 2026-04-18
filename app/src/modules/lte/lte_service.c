@@ -19,6 +19,19 @@ LOG_MODULE_REGISTER(lte_service, LOG_LEVEL_INF);
 static bool lte_connected; 
 static bool probe_pending;
 
+static const char *lte_mode_name(enum lte_lc_lte_mode mode)
+{
+    switch (mode) {
+    case LTE_LC_LTE_MODE_NONE:
+        return "NONE";
+    case LTE_LC_LTE_MODE_LTEM:
+        return "LTE-M";
+    case LTE_LC_LTE_MODE_NBIOT:
+        return "NB-IoT";
+    default:
+        return "UNKNOWN";
+    }
+}
 
 static void lte_lc_evt_handler(const struct lte_lc_evt *const evt)
 {
@@ -61,9 +74,10 @@ static void lte_lc_evt_handler(const struct lte_lc_evt *const evt)
         break;
 
     case LTE_LC_EVT_LTE_MODE_UPDATE:
-        LOG_INF("LTE mode update %d", evt->lte_mode);
+        LOG_INF("LTE mode update: %s (%d)",
+                lte_mode_name(evt->lte_mode),
+                evt->lte_mode);
         break;
-
     default:
         LOG_DBG("Unhandled LTE evnt type: %d", evt->type);
         break;

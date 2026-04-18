@@ -23,7 +23,7 @@
 //#include <zephyr/kernel.h>
 
 /* for udp test */
-#define SERVER_PORT 57967 // port 
+#define SERVER_PORT 35515 // port 
 #define SERVER_ADDR "46.226.106.127" // tcpbin.net
 
 static struct k_work switch_work;
@@ -43,51 +43,63 @@ enum modem_access_mode {
 };
 
 
-
-
 LOG_MODULE_REGISTER(modem_service, LOG_LEVEL_INF);
+
 
 static int modem_at_ok(const char *cmd)
 {
     int err = nrf_modem_at_printf("%s", cmd);
-    if (err) {
-        LOG_ERR("AT failed: %s (err=%d)", cmd, err);
+
+    if (err == 0) {
+        LOG_INF("AT ok: %s", cmd);
+        return 0;
+    }
+
+    if (err > 0) {
+        LOG_ERR("AT failed: %s (raw=%d, at_err=%d)", cmd, err, nrf_modem_at_err(err));
         return err;
     }
 
-    LOG_INF("AT ok: %s", cmd);
-    return 0;
+    LOG_ERR("AT failed: %s (lib err=%d)", cmd, err);
+    return err;
 }
-
-
 
 static int modem_service_switch(enum modem_access_mode mode)
 {
     int err;
 
-    /* preserve PDN context */
+    LOG_INF("switch: sending CFUN=45");
     err = modem_at_ok("AT+CFUN=45");
-    if (err) return err;
+    LOG_INF("switch: CFUN=45 ret=%d", err);
+    if (err) {
+        return err;
+    }
 
     switch (mode) {
-    /* set LTE-M system mode */
     case MODEM_ACCESS_TN:
+        LOG_INF("switch: sending XSYSTEMMODE TN");
         err = modem_at_ok("AT%XSYSTEMMODE=1,0,0,0,0");
+        LOG_INF("switch: XSYSTEMMODE TN ret=%d", err);
         break;
 
-    /* set NTN system mode */
     case MODEM_ACCESS_NTN:
+        LOG_INF("switch: sending XSYSTEMMODE NTN");
         err = modem_at_ok("AT%XSYSTEMMODE=0,0,0,0,1");
+        LOG_INF("switch: XSYSTEMMODE NTN ret=%d", err);
         break;
 
     default:
+        LOG_INF("modem service switch default case");
         return -EINVAL;
     }
 
-    if (err) return err;
+    if (err) {
+        return err;
+    }
 
-    /* start modem */
+    LOG_INF("switch: sending CFUN=1");
     err = modem_at_ok("AT+CFUN=1");
+    LOG_INF("switch: CFUN=1 ret=%d", err);
     return err;
 }
 
@@ -120,6 +132,8 @@ static void modem_switch_work_handler(struct k_work *work)
         break;
 
     case MODEM_SWITCH_IDLE:
+        LOG_INF("modem switch idle case triggered");
+        break;
     default:
         break;
     }
@@ -182,9 +196,10 @@ int modem_service_udp_send_test(void)
                     (struct sockaddr *)&addr,
                     sizeof(addr));
 
-                        if (err < 0) {
-    err = -errno;
+    if (err < 0) {
+        err = -errno;
         LOG_ERR("sendto failed: errno=%d", -err);
+        
         zsock_close(sock);
         return err;
     }
