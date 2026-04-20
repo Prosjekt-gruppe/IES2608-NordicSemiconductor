@@ -58,6 +58,7 @@ static uint32_t current_poll_interval_sec = CONFIG_APP_MODEM_SIGNAL_POLL_INTERVA
 static int rsrp_hist[RSRP_HISTORY_LEN];
 static uint8_t rsrp_hist_idx;
 static uint8_t rsrp_hist_count;
+static uint8_t rsrp_weak_count;
 static uint8_t rsrp_unavailable_count;
 
 
@@ -67,6 +68,7 @@ static void reset_signal_tracking(void)
     last_rsrp_dbm = INT32_MIN;
     rsrp_hist_idx = 0U;
     rsrp_hist_count = 0U;
+    rsrp_weak_count = 0U;
     rsrp_unavailable_count = 0U;
     fallback_requested = false;
 }
@@ -147,6 +149,23 @@ static bool should_publish_lte_poor(int rsrp_dbm)
     bool weak_signal = rsrp_dbm <= CONFIG_APP_MODEM_RSRP_FALLBACK_DBM;
     bool sharp_drop = false;
     bool worsening;
+    bool weak_for_too_long = false;
+
+    if (weak_signal) {
+        if (rsrp_weak_count < UINT8_MAX) {
+            rsrp_weak_count++;
+        }
+
+        if (rsrp_weak_count >= CONFIG_APP_MODEM_RSRP_WEAK_SAMPLE_COUNT) {
+            LOG_WRN("LTE-M RSRP weak for %u/%u samples: %d dBm",
+                    (unsigned int)rsrp_weak_count,
+                    (unsigned int)CONFIG_APP_MODEM_RSRP_WEAK_SAMPLE_COUNT,
+                    rsrp_dbm);
+            weak_for_too_long = true;
+        }
+    } else {
+        rsrp_weak_count = 0U;
+    }
 
     /* detect sharp decline in signal strength */
     if (last_rsrp_dbm != INT32_MIN) {
@@ -169,7 +188,7 @@ static bool should_publish_lte_poor(int rsrp_dbm)
     worsening = rsrp_trend_worsening();
     last_rsrp_dbm = rsrp_dbm;
     
-    return weak_signal && (sharp_drop || worsening);
+    return weak_signal && (sharp_drop || worsening || weak_for_too_long);
 }
 
 static void record_rsrp_available(void)
@@ -179,6 +198,8 @@ static void record_rsrp_available(void)
 
 static uint8_t record_rsrp_unavailable(void)
 {
+    rsrp_weak_count = 0U;
+
     if (rsrp_unavailable_count < UINT8_MAX) {
         rsrp_unavailable_count++;
     }

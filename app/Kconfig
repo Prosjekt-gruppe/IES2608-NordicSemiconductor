@@ -66,6 +66,15 @@ config APP_MODEM_RSRP_LOSS_SAMPLE_COUNT
       switching RAT because of one temporary AT command or modem measurement
       failure.
 
+config APP_MODEM_RSRP_WEAK_SAMPLE_COUNT
+    int "Weak LTE-M RSRP samples before NTN fallback"
+    default 3
+    range 1 20
+    help
+      Number of consecutive valid RSRP samples at or below the fallback
+      threshold needed before the modem service requests NTN fallback, even if
+      the signal is not actively dropping anymore.
+
 config APP_SENSOR_ACCEL_DEMO
     bool "Enable accelerometer demo"
     default y if BOARD_THINGY91X_NRF9151_NS
@@ -73,6 +82,16 @@ config APP_SENSOR_ACCEL_DEMO
     help
       Build the BMI270 accelerometer demo and motion-hint generation.
       Enable this on boards that actually provide a compatible accelerometer.
+
+config APP_SENSOR_ACCEL_MOVING_HOLD_MS
+    int "Accelerometer moving hold time in milliseconds"
+    default 60000
+    range 0 600000
+    depends on APP_SENSOR_ACCEL_DEMO
+    help
+      Keep reporting moving for this long after the last clear acceleration or
+      velocity event. This helps smooth vehicle movement keep the faster RSRP
+      polling interval even when acceleration is temporarily quiet.
 
 config APP_SENSOR_BATT_DEMO
     bool "Enable battery demo"

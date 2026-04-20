@@ -217,6 +217,7 @@ static void accel_thread(void *arg1, void *arg2, void *arg3)
 	bool motion_hint_sent = false;
 	uint32_t quiet_time_ms = 0;
 	uint32_t last_sample_ts_ms = 0;
+	uint32_t last_movement_ts_ms = 0;
 	uint32_t last_motion_log_ts_ms = 0;
 	uint32_t last_zbus_publish_ts_ms = 0;
 
@@ -230,6 +231,8 @@ static void accel_thread(void *arg1, void *arg2, void *arg3)
 		uint32_t speed_mm_s;
 		bool moving_now;
 		bool motion_state_changed;
+		bool motion_observed;
+		bool moving_hold_active;
 		uint32_t sample_delta_mg;
 		bool sample_quiet;
 
@@ -335,13 +338,23 @@ static void accel_thread(void *arg1, void *arg2, void *arg3)
 		speed_mm_s = accel_vector_magnitude_mg(velocity_mm_s[0],
 							 velocity_mm_s[1],
 							 velocity_mm_s[2]);
-		moving_now = (!sample_quiet && (linear_accel_mg >= ACCEL_MOVEMENT_THRESHOLD_MG)) ||
-			     (speed_mm_s >= ACCEL_MOVING_SPEED_MM_S);
 
 		if (quiet_time_ms >= ACCEL_ZERO_VELOCITY_MS) {
-			moving_now = false;
 			speed_mm_s = 0;
 		}
+
+		motion_observed = (!sample_quiet &&
+				   (linear_accel_mg >= ACCEL_MOVEMENT_THRESHOLD_MG)) ||
+				  (speed_mm_s >= ACCEL_MOVING_SPEED_MM_S);
+
+		if (motion_observed) {
+			last_movement_ts_ms = now_ms;
+		}
+
+		moving_hold_active = (last_movement_ts_ms != 0U) &&
+				     ((now_ms - last_movement_ts_ms) <=
+				      CONFIG_APP_SENSOR_ACCEL_MOVING_HOLD_MS);
+		moving_now = motion_observed || moving_hold_active;
 
 		if (!sample_quiet && (linear_accel_mg >= ACCEL_MOVEMENT_THRESHOLD_MG) &&
 		    ((last_motion_log_ts_ms == 0U) ||
