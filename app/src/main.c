@@ -23,6 +23,10 @@
 #include "app_events.h"
 #include "app_sm.h"
 
+#if defined(CONFIG_APP_FIELD_LOG)
+#include "field_log.h"
+#endif
+
 
 #if defined(CONFIG_APP_SENSOR_ACCEL_DEMO)
 #include "accel.h"
@@ -39,6 +43,14 @@ int main(void)
     static struct app_ctx ctx;
 
     app_sm_start(&ctx);
+
+#if defined(CONFIG_APP_FIELD_LOG)
+    int err = field_log_start();
+
+    if (err) {
+        LOG_WRN("field_log_start failed: %d", err);
+    }
+#endif
 
     struct app_event boot = { .type = EVT_BOOT };
 

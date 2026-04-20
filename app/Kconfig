@@ -109,6 +109,51 @@ config APP_SENSOR_TEMP_DEMO
       Build the BME680 environmental sensor demo.
       Enable this on boards that actually provide a compatible temperature sensor.
 
+config APP_FIELD_LOG
+    bool "Enable compact field log prototype"
+    default y if APP_SENSOR_BATT_DEMO
+    depends on APP_SENSOR_BATT_DEMO
+    depends on FLASH
+    select FLASH_MAP
+    select FLASH_PAGE_LAYOUT
+    help
+      Build a compact battery-only field log prototype. The prototype writes
+      one fixed-size binary summary record to external flash at a configurable
+      interval and mirrors the same summary to the serial log.
+
+config APP_FIELD_LOG_SUMMARY_INTERVAL_SEC
+    int "Field log summary interval in seconds"
+    default 60
+    range 10 3600
+    depends on APP_FIELD_LOG
+    help
+      Interval between battery summary records.
+
+config APP_FIELD_LOG_STORAGE_BYTES
+    int "Field log storage budget in bytes"
+    default 16384
+    range 4096 1048576
+    depends on APP_FIELD_LOG
+    help
+      Number of bytes reserved from the generated external_flash partition for
+      this prototype log. Keep this small while debugging.
+
+config APP_FIELD_LOG_ERASE_BLOCK_SIZE
+    int "Field log erase block size"
+    default 4096
+    range 4096 65536
+    depends on APP_FIELD_LOG
+    help
+      Erase block size used by the external flash device. The Thingy:91 X
+      external NOR flash uses 4096-byte erase sectors.
+
+config APP_FIELD_LOG_ERASE_ON_BOOT
+    bool "Erase field log storage on boot"
+    depends on APP_FIELD_LOG
+    help
+      Erase the configured field log storage area during startup. This is
+      useful while prototyping but should be left disabled for field testing.
+
 config APP_CORE_SEND_UDP_DATA
     bool "Send UDP data over NTN"
     help

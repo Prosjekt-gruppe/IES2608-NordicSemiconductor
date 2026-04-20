@@ -13,6 +13,13 @@ LOG_MODULE_REGISTER(app_zbus, LOG_LEVEL_INF);
 
 ZBUS_OBS_DECLARE(app_fsm_sub);
 
+#if defined(CONFIG_APP_FIELD_LOG)
+ZBUS_OBS_DECLARE(field_log_batt_sub);
+#define APP_BATTERY_OBSERVERS ZBUS_OBSERVERS(field_log_batt_sub)
+#else
+#define APP_BATTERY_OBSERVERS ZBUS_OBSERVERS_EMPTY
+#endif
+
 ZBUS_CHAN_DEFINE(gnss_status_chan,
 		 struct app_gnss_status,
 		 NULL,
@@ -47,7 +54,7 @@ ZBUS_CHAN_DEFINE(battery_sample_chan,
 		 struct app_battery_sample,
 		 NULL,
 		 NULL,
-		 ZBUS_OBSERVERS_EMPTY,
+		 APP_BATTERY_OBSERVERS,
 		 ZBUS_MSG_INIT(.timestamp_ms = 0,
 			       .voltage_mv = 0,
 			       .current_ma = 0,
