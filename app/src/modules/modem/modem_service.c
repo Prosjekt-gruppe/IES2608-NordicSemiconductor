@@ -42,6 +42,12 @@ enum modem_access_mode {
     MODEM_ACCESS_NTN,
 };
 
+struct udp_test_cfg {
+    size_t payload_len;
+    int interval_ms;
+    int count;
+};
+
 
 LOG_MODULE_REGISTER(modem_service, LOG_LEVEL_INF);
 
@@ -204,6 +210,48 @@ int modem_service_udp_send_test(void)
         return err;
     }
 
+
+    zsock_close(sock);
+    return 0;
+}
+
+int modem_service_udp_send_burst(const struct udp_test_cfg *cfg)
+{
+    const struct udp_test_cfg *c = cfg;
+    
+    int sock;
+    struct sockaddr_in addr = {0};
+    
+    char buf[256];
+
+    if (c->payload_len > sizeof(buf)) {
+        return -EINVAL;
+    }
+
+    /* generate dummy data */
+    memset(buf, 0xAA, c->payload_len);
+
+    sock = zsock_socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+    if (sock < 0) {
+        return -errno;
+    }
+
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(SERVER_PORT);
+    zsock_inet_pton(AF_INET, SERVER_ADDR, &addr.sin_addr);
+
+    for (int i = 0; i < c->count; i++) {
+        int err = zsock_sendto(sock, buf, c->payload_len, 0,
+                               (struct sockaddr *)&addr,
+                               sizeof(addr));
+
+        if (err < 0) {
+            zsock_close(sock);
+            return -errno;
+        }
+
+        k_msleep(c->interval_ms);
+    }
 
     zsock_close(sock);
     return 0;
