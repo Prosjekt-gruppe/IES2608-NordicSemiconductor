@@ -69,7 +69,8 @@ static void ntn_connected_exit(void *obj);
 static void lte_probe_entry(void *obj);
 static enum smf_state_result lte_probe_run(void *obj);
 
-static void handle_gnss_status(struct app_ctx *ctx, const struct app_gnss_status *status);
+static void __maybe_unused handle_gnss_status(struct app_ctx *ctx,
+                                              const struct app_gnss_status *status);
 
 static void dispatch_app_event(struct app_ctx *ctx, const struct app_event *ev);
 static void backoff_timer_handler(struct k_timer *timer);
@@ -675,7 +676,11 @@ static void ntn_timer_handler(struct k_timer *timer)
 
 static void ntn_connected_entry(void *obj)
 {
+#if defined(CONFIG_APP_CORE_SM_PROBE_TEST)
     struct app_ctx *ctx = obj;
+#else
+    ARG_UNUSED(obj);
+#endif
 
 /* force lte probe check after 50 sec*/
 #if defined(CONFIG_APP_CORE_SM_PROBE_TEST)
@@ -727,15 +732,18 @@ static enum smf_state_result ntn_connected_run(void *obj)
 
 static void ntn_connected_exit(void *obj)
 {
-    struct app_ctx *ctx = obj;
-
     LOG_INF("ntn connected exit");
 #if defined(CONFIG_APP_CORE_SM_PROBE_TEST)
+    struct app_ctx *ctx = obj;
+
     k_timer_stop(&ctx->ntn_timer);
+#else
+    ARG_UNUSED(obj);
 #endif
 }
 
-static void handle_gnss_status(struct app_ctx *ctx, const struct app_gnss_status *status)
+static void __maybe_unused handle_gnss_status(struct app_ctx *ctx,
+                                              const struct app_gnss_status *status)
 {
     struct app_event ev = {0};
     
