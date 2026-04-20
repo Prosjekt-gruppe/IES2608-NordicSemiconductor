@@ -26,7 +26,7 @@ static bool first_fix;
 static int publish_timeout(void)
 {
     struct app_event ev = {
-        .type = EVT_GNSS_TIMEOUT,
+        .type = EVT_TIMEOUT,
     };
 
     return app_event_put(&ev, K_NO_WAIT);

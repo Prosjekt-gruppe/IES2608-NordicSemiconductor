@@ -28,10 +28,10 @@ const char *app_evt_name(enum app_evt_type type)
     case EVT_REG_FAIL: return "EVT_REG_FAIL";
 
     case EVT_GNSS_FIX: return "EVT_GNSS_FIX";
-    case EVT_GNSS_TIMEOUT: return "EVT_GNSS_TIMEOUT";
+    //case EVT_GNSS_TIMEOUT: return "EVT_GNSS_TIMEOUT";
 
-    case EVT_NTN_REG_FAIL: return "EVT_NTN_REG_FAIL";
-    case EVT_NTN_TIMEOUT: return "EVT_NTN_TIMEOUT";
+    //case EVT_NTN_REG_FAIL: return "EVT_NTN_REG_FAIL";
+    //case EVT_NTN_TIMEOUT: return "EVT_NTN_TIMEOUT";
     case EVT_TIMEOUT: return "EVT_TIMEOUT";
 
     case EVT_RSRP_UPDATE: return "EVT_RSRP_UPDATE";
@@ -39,7 +39,7 @@ const char *app_evt_name(enum app_evt_type type)
     case EVT_LTE_POOR: return "EVT_LTE_POOR";
     case EVT_LTE_GOOD: return "EVT_LTE_GOOD";
 
-    case EVT_BACKOFF_TIMEOUT: return "EVT_BACKOFF_TIMEOUT";
+    //case EVT_BACKOFF_TIMEOUT: return "EVT_BACKOFF_TIMEOUT";
 
     case EVT_LTE_LOC_OK: return "EVT_LTE_LOC_OK";
     case EVT_LTE_LOC_FAIL: return "EVT_LTE_LOC_FAIL";

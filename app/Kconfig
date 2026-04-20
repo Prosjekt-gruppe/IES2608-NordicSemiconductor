@@ -141,5 +141,13 @@ config APP_DEBUG_LTE_LOCATION
   help 
     Stop after LTE cellular location returns sucess, failure or timeout, 
     instead of continuing to later stages
+
+config APP_DEBUG_NTN
+  bool "Add additional modem info"
+  depends on APP_DEBUG
+  default n
+  help 
+    Verbose info from modem
+
 endmenu
 
