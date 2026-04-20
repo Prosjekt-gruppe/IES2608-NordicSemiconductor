@@ -313,21 +313,13 @@ static void ltem_connected_entry(void *obj)
         LOG_WRN("Failed to start LTE signal monitor: %d", err);
     }
 
-    /*
-    err = rsrp_service_start();
-    if (err < 0) {
-    LOG_WRN("Failed to start LTE signal monitor: %d", err);
-    }
-    */
 
 #if defined(CONFIG_APP_CORE_SM_PROBE_TEST)
     LOG_INF("ltem timer start");
     k_timer_start(&ctx->lte_timer, K_MSEC(3000), K_NO_WAIT);
 #endif
 
-/*
- * TODO(?): should probably be implemented into ltem_connected_run ?
- */
+
 #if defined(CONFIG_APP_DEBUG_LTE_CONNECTING)
     LOG_INF("STATE_LTEM_CONNECTED --> STATE_CLOUD_CONNECTING");
     smf_set_state(SMF_CTX(ctx), &states[STATE_CLOUD_CONNECTING]);
@@ -537,11 +529,6 @@ static void lte_location_exit(void *obj)
 
     LOG_INF("lte location exit");
     
-    /*
-    #if defined(CONFIG_APP_CORE_SM_PROBE_TEST)
-        k_timer_stop(&ctx->lte_timer);
-    #endif
-    */
 }
 
 
@@ -555,12 +542,15 @@ static void gnss_acquire_entry(void *obj)
     (void)gnss_service_start();
     
 
+    /*
     LOG_INF("Forcing GNSS timeout path for NTN test");
 
     struct app_event ev = {
-        .type = EVT_GNSS_TIMEOUT
+        .type = EVT_TIMEOUT
     };
     (void)app_event_put(&ev, K_NO_WAIT);
+    
+    */
 
     LOG_INF("(%s) GNSS_ACQUIRE entry done", __func__);
 }
@@ -586,7 +576,7 @@ static enum smf_state_result gnss_acquire_run(void *obj)
         return SMF_EVENT_HANDLED;
     
 
-    case EVT_GNSS_TIMEOUT:
+    case EVT_TIMEOUT:
         LOG_INF("GNSS_ACQUIRE: gnss timeout");
         (void)gnss_service_stop();
 
@@ -643,18 +633,18 @@ static enum smf_state_result ntn_connecting_run(void *obj)
         LOG_INF("ntn registered ok");
         
         ctx->active_rat = RAT_NTN;
-        //smf_set_state(SMF_CTX(ctx), &states[STATE_NTN_CONNECTED]);
+        smf_set_state(SMF_CTX(ctx), &states[STATE_NTN_CONNECTED]);
         return SMF_EVENT_HANDLED;
     
     case EVT_PDN_UP:
+        LOG_WRN("PDN_UP in NTN_CONNECTING (unexpected order)");
         ctx->pdn_up = true;
-        ctx->active_rat = RAT_NTN;
         smf_set_state(SMF_CTX(ctx), &states[STATE_NTN_CONNECTED]);
         return SMF_EVENT_HANDLED;
 
     case EVT_REG_FAIL:
     case EVT_PDN_DOWN:
-    case EVT_NTN_TIMEOUT:
+    case EVT_TIMEOUT:
         LOG_INF("ntn connect failed/timeout");
 
         ctx->pdn_up=false;
@@ -677,7 +667,7 @@ static void ntn_timer_handler(struct k_timer *timer)
     ARG_UNUSED(timer);
 
     struct app_event ev = {
-        .type = EVT_NTN_TIMEOUT
+        .type = EVT_TIMEOUT
     };
 
     (void)app_event_put(&ev, K_NO_WAIT);
@@ -687,12 +677,7 @@ static void ntn_connected_entry(void *obj)
 {
     struct app_ctx *ctx = obj;
 
-#if defined(CONFIG_APP_CORE_SEND_UDP_DATA)
-    int err = modem_service_udp_send_test();
-    LOG_INF("UDP test send result: %d", err);
-#endif
-
-/* force lte probe check */
+/* force lte probe check after 50 sec*/
 #if defined(CONFIG_APP_CORE_SM_PROBE_TEST)
     LOG_INF("Starting ntn connected timer");
     int32_t delay_ms = 50000;
@@ -709,16 +694,28 @@ static enum smf_state_result ntn_connected_run(void *obj)
     struct app_ctx *ctx = obj;
 
     switch (ctx->ev.type) {
-    case EVT_NTN_TIMEOUT:
+    case EVT_TIMEOUT:
         LOG_INF("ntn timeout -> entering lte-probe");
         smf_set_state(SMF_CTX(ctx), &states[STATE_LTE_PROBE]);
         return SMF_EVENT_HANDLED;
+
+    case EVT_PDN_UP:
+        ctx->pdn_up = true;
+        LOG_INF("PDN up");
+
+#if defined(CONFIG_APP_CORE_SEND_UDP_DATA)
+        int err = modem_service_udp_send_test();
+        LOG_INF("UDP test send result: %d", err);
+#endif
+
+        return SMF_EVENT_HANDLED;
+    
     case EVT_REG_FAIL:
-    case EVT_NTN_REG_FAIL:
     case EVT_PDN_DOWN:
         ctx->pdn_up = false;
+        ctx->next_rat = RAT_LTEM;
         LOG_INF("NTN connection lost/failed");
-        smf_set_state(SMF_CTX(ctx), &states[STATE_IDLE]);
+        smf_set_state(SMF_CTX(ctx), &states[STATE_BACKOFF]);
         return SMF_EVENT_HANDLED;
 
     default:
@@ -752,13 +749,13 @@ static void handle_gnss_status(struct app_ctx *ctx, const struct app_gnss_status
         return;
         
         case APP_GNSS_STATE_TIMEOUT:
-        ev.type = EVT_GNSS_TIMEOUT;
+        ev.type = EVT_TIMEOUT;
         dispatch_app_event(ctx, &ev);
         return;
         
         case APP_GNSS_STATE_ERROR:
         LOG_WRN("GNSS reported error %d, treating as timeout", status->err);
-        ev.type = EVT_GNSS_TIMEOUT;
+        ev.type = EVT_TIMEOUT;
         dispatch_app_event(ctx, &ev);
         return;
         
@@ -779,7 +776,6 @@ static void lte_probe_entry(void *obj)
 
     struct app_ctx *ctx = obj;
     
-    //(void)rsrp_service_start_probe(3);
     
     /* enable lte-service probe event on rsrp */
     lte_service_set_probe_pending(true);
@@ -816,7 +812,6 @@ static enum smf_state_result lte_probe_run(void *obj)
         return SMF_EVENT_HANDLED;
 
     case EVT_LTE_GOOD:
-
         LOG_INF("LTE probe: TN good -> UDP test");
         
         /* send udp */
@@ -863,7 +858,7 @@ static void backoff_timer_handler(struct k_timer *timer)
     ARG_UNUSED(timer);
 
     struct app_event ev = {
-        .type = EVT_BACKOFF_TIMEOUT
+        .type = EVT_TIMEOUT
     };
 
     (void)app_event_put(&ev, K_NO_WAIT);
@@ -893,7 +888,7 @@ static enum smf_state_result backoff_run(void *obj)
     struct app_ctx *ctx = obj;
 
     switch (ctx->ev.type) {
-    case EVT_BACKOFF_TIMEOUT:
+    case EVT_TIMEOUT:
         if (ctx->next_rat != RAT_NTN) {
             LOG_INF("Retry LTE connect");
             smf_set_state(SMF_CTX(ctx), &states[STATE_LTEM_CONNECTING]);

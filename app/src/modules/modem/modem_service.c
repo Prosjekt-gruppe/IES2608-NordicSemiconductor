@@ -23,7 +23,7 @@
 //#include <zephyr/kernel.h>
 
 /* for udp test */
-#define SERVER_PORT 35515 // port 
+#define SERVER_PORT 59569 // port 
 #define SERVER_ADDR "46.226.106.127" // tcpbin.net
 
 static struct k_work switch_work;

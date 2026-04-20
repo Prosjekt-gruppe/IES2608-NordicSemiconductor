@@ -33,6 +33,9 @@ static const char *lte_mode_name(enum lte_lc_lte_mode mode)
     }
 }
 
+/*
+* TODO: filter modem events based on active rat
+*/
 static void lte_lc_evt_handler(const struct lte_lc_evt *const evt)
 {
     switch (evt->type) {

@@ -3,11 +3,12 @@
  *
  * SPDX-License-Identifier: LicenseRef-Nordic-5-Clause
  */ 
+
 #include "ntn_service.h"
 #include "app_events.h"
 
 #include "modem_service.h"
-
+#include <nrf_modem_at.h>
 #include <modem/lte_lc.h>
 #include <modem/ntn.h>
 #include <zephyr/kernel.h>
@@ -136,6 +137,7 @@ static int ntn_service_prepare(struct app_ctx *ctx)
 
     err = lte_lc_system_mode_set(LTE_LC_SYSTEM_MODE_NTN_NBIOT,
                                  LTE_LC_SYSTEM_MODE_PREFER_AUTO);
+    
     if (err) {
         return err;
     }
@@ -170,8 +172,8 @@ int ntn_service_connect(struct app_ctx *ctx)
     }
     
 /* verbose modem */
-#ifndef CONFIG_APP_DEBUG_NTN
-    err = cereg_notification_enable();
+#ifdef CONFIG_APP_DEBUG_NTN
+    err = nrf_modem_at_printf("AT+CEREG=5");
     if (err) {
         return err;
     }
