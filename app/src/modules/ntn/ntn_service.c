@@ -3,9 +3,12 @@
  *
  * SPDX-License-Identifier: LicenseRef-Nordic-5-Clause
  */ 
+
 #include "ntn_service.h"
 #include "app_events.h"
 
+#include "modem_service.h"
+#include <nrf_modem_at.h>
 #include <modem/lte_lc.h>
 #include <modem/ntn.h>
 #include <zephyr/kernel.h>
@@ -13,21 +16,10 @@
 
 LOG_MODULE_REGISTER(ntn_service, LOG_LEVEL_INF);
 
-/*
-static int publish_evt(enum app_evt_type type)
-{
-    struct app_event ev = {
-        .type = type, 
-    };
-    LOG_INF("Publishing %s", app_evt_name(type)); 
-    return app_event_put(&ev, K_NO_WAIT); 
-}
-*/
+static bool initialized;
 
 static void ntn_lc_evt_handler(const struct lte_lc_evt *const evt)
-{
-    //struct app_event app_ev = {0};
-    
+{    
     switch (evt->type) {
     case LTE_LC_EVT_NW_REG_STATUS:
         LOG_INF("NTN NW registration status: %d", evt->nw_reg_status);
@@ -57,14 +49,12 @@ static void ntn_lc_evt_handler(const struct lte_lc_evt *const evt)
 
         case LTE_LC_EVT_PDN_ACTIVATED:
             LOG_INF("NTN: PDN activated");
-            //app_ev.type = EVT_PDN_UP;
             (void)app_event_publish_type(EVT_PDN_UP);
             break;
 
         case LTE_LC_EVT_PDN_DEACTIVATED:
         case LTE_LC_EVT_PDN_NETWORK_DETACH:
             LOG_INF("NTN: PDN down");
-            //app_ev.type = EVT_PDN_DOWN;
             (void)app_event_publish_type(EVT_PDN_DOWN);
             break;
 
@@ -98,13 +88,35 @@ static int ntn_service_prepare(struct app_ctx *ctx)
         .uicc = LTE_LC_UICC_PHYSICAL,
     };
 
+    /*
+    struct lte_lc_cellular_profile tn_profile = {
+        .id = 1,
+        .act = LTE_LC_ACT_LTEM || LTE_LC_ACT_NBIOT,
+        .uicc = LTE_LC_UICC_PHYSICAL,
+    };
+    */
+
+    struct lte_lc_cellular_profile tn_profile = {
+        .id = 1,
+        .act = LTE_LC_ACT_LTEM,
+        .uicc = LTE_LC_UICC_PHYSICAL,
+    };
+
+
     if (!ctx->ntn_initialized) {
         err = lte_lc_power_off();
         if (err) {
             return err;
         }
 
+        /* setup NTN profile */
         err = lte_lc_cellular_profile_configure(&ntn_profile);
+        if (err) {
+            return err;
+        }
+
+        /* setup TN profile */
+        err = lte_lc_cellular_profile_configure(&tn_profile);
         if (err) {
             return err;
         }
@@ -112,6 +124,7 @@ static int ntn_service_prepare(struct app_ctx *ctx)
         ctx->ntn_initialized = true;
     }
 
+    /* simple set location */
     if (ctx->have_fix) {
         err = ntn_location_set((double)ctx->last_pvt.latitude,
                                (double)ctx->last_pvt.longitude,
@@ -124,10 +137,21 @@ static int ntn_service_prepare(struct app_ctx *ctx)
 
     err = lte_lc_system_mode_set(LTE_LC_SYSTEM_MODE_NTN_NBIOT,
                                  LTE_LC_SYSTEM_MODE_PREFER_AUTO);
+    
     if (err) {
         return err;
     }
 
+    return 0;
+}
+
+int ntn_service_init(void)
+{
+    if (initialized) {
+        return 0;
+    }
+
+    initialized = true;
     return 0;
 }
 
@@ -136,10 +160,27 @@ int ntn_service_connect(struct app_ctx *ctx)
 {
     int err;
 
+    LOG_INF("hello from ntn_service_connect");
+
+    if (!initialized) {
+        return -EINVAL;
+    }
+
     err = ntn_service_prepare(ctx);
     if (err) {
         return err;
     }
+    
+/* verbose modem */
+#ifdef CONFIG_APP_DEBUG_NTN
+    err = nrf_modem_at_printf("AT+CEREG=5");
+    if (err) {
+        return err;
+    }
+#endif
 
+    /* start modem */
     return lte_lc_connect_async(ntn_lc_evt_handler);
 }
+
+
