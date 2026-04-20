@@ -154,6 +154,16 @@ config APP_FIELD_LOG_ERASE_ON_BOOT
       Erase the configured field log storage area during startup. This is
       useful while prototyping but should be left disabled for field testing.
 
+config APP_FIELD_LOG_SHELL
+    bool "Enable field log shell commands"
+    default y
+    depends on APP_FIELD_LOG
+    select SHELL
+    select SHELL_BACKEND_SERIAL
+    help
+      Enable the fieldlog shell command group with info, dump and erase
+      commands over the serial shell.
+
 config APP_CORE_SEND_UDP_DATA
     bool "Send UDP data over NTN"
     help

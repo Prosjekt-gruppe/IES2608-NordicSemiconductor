@@ -19,6 +19,10 @@
 #include <zephyr/sys/util.h>
 #include <zephyr/zbus/zbus.h>
 
+#if defined(CONFIG_APP_FIELD_LOG_SHELL)
+#include <zephyr/shell/shell.h>
+#endif
+
 LOG_MODULE_REGISTER(field_log, LOG_LEVEL_INF);
 
 #define FIELD_LOG_STACK_SIZE 1536
@@ -96,6 +100,8 @@ static off_t storage_write_offset;
 static uint32_t next_sequence;
 static bool storage_ready;
 static bool storage_full;
+
+K_MUTEX_DEFINE(field_log_storage_mutex);
 
 static struct field_log_batt_accum batt_accum;
 
@@ -336,6 +342,11 @@ static int field_log_storage_write(const struct field_log_battery_summary_record
 	return 0;
 }
 
+static bool field_log_storage_available(void)
+{
+	return storage_area != NULL && storage_capacity >= FIELD_LOG_RECORD_SIZE;
+}
+
 static void field_log_batt_accum_reset_interval(int64_t start_ms)
 {
 	batt_accum.summary_start_ms = start_ms;
@@ -372,9 +383,9 @@ static void field_log_integrate_until(int64_t timestamp_ms)
 
 	batt_accum.net_energy_interval_uwh += net_energy_uwh;
 
-	if (batt_accum.last_sample.current_ma > 0) {
+	if (batt_accum.last_sample.current_ma < 0) {
 		discharge_energy_uwh = (batt_accum.last_sample.voltage_mv *
-					batt_accum.last_sample.current_ma *
+					-batt_accum.last_sample.current_ma *
 					delta_ms) / 3600000LL;
 		batt_accum.discharge_energy_interval_uwh += discharge_energy_uwh;
 		batt_accum.discharge_energy_total_uwh += discharge_energy_uwh;
@@ -469,6 +480,9 @@ static void field_log_publish_battery_summary(void)
 	int err;
 
 	field_log_integrate_until(now_ms);
+
+	k_mutex_lock(&field_log_storage_mutex, K_FOREVER);
+
 	field_log_build_battery_record(&record, now_ms);
 
 	if (record.sample_count == 0) {
@@ -497,6 +511,8 @@ static void field_log_publish_battery_summary(void)
 	} else if (err != -ENODEV && err != -ENOSPC) {
 		LOG_WRN("Field log summary was not persisted: %d", err);
 	}
+
+	k_mutex_unlock(&field_log_storage_mutex);
 
 	field_log_batt_accum_reset_interval(now_ms);
 }
@@ -569,3 +585,205 @@ int field_log_start(void)
 
 	return 0;
 }
+
+#if defined(CONFIG_APP_FIELD_LOG_SHELL)
+static int field_log_count_records(uint32_t *valid_records, off_t *stop_offset,
+				   bool *stopped_on_invalid)
+{
+	struct field_log_battery_summary_record record;
+	uint32_t count = 0;
+
+	*stopped_on_invalid = false;
+	*stop_offset = 0;
+
+	for (off_t offset = 0; offset + sizeof(record) <= storage_capacity;
+	     offset += sizeof(record)) {
+		int err = flash_area_read(storage_area, offset, &record, sizeof(record));
+
+		if (err) {
+			return err;
+		}
+
+		if (record_is_erased(&record)) {
+			*stop_offset = offset;
+			*valid_records = count;
+			return 0;
+		}
+
+		if (!record_is_valid(&record)) {
+			*stopped_on_invalid = true;
+			*stop_offset = offset;
+			*valid_records = count;
+			return 0;
+		}
+
+		count++;
+		*stop_offset = offset + sizeof(record);
+	}
+
+	*valid_records = count;
+	return 0;
+}
+
+static int cmd_fieldlog_info(const struct shell *shell, size_t argc, char **argv)
+{
+	uint32_t valid_records = 0;
+	off_t stop_offset = 0;
+	bool stopped_on_invalid = false;
+	int err = 0;
+
+	ARG_UNUSED(argc);
+	ARG_UNUSED(argv);
+
+	k_mutex_lock(&field_log_storage_mutex, K_FOREVER);
+
+	if (!field_log_storage_available()) {
+		k_mutex_unlock(&field_log_storage_mutex);
+		shell_error(shell, "field log storage is not available");
+		return -ENODEV;
+	}
+
+	err = field_log_count_records(&valid_records, &stop_offset, &stopped_on_invalid);
+
+	shell_print(shell, "fieldlog storage:");
+#if defined(PM_EXTERNAL_FLASH_ID)
+	shell_print(shell, "  area_id: %u", PM_EXTERNAL_FLASH_ID);
+#else
+	shell_print(shell, "  area_id: unavailable");
+#endif
+	shell_print(shell, "  area_offset: 0x%lx", (long)storage_area->fa_off);
+	shell_print(shell, "  capacity_bytes: %zu", storage_capacity);
+	shell_print(shell, "  record_size_bytes: %u", FIELD_LOG_RECORD_SIZE);
+	shell_print(shell, "  valid_records: %u", valid_records);
+	shell_print(shell, "  stop_offset: 0x%lx", (long)stop_offset);
+	shell_print(shell, "  write_offset: 0x%lx", (long)storage_write_offset);
+	shell_print(shell, "  next_sequence: %u", next_sequence);
+	shell_print(shell, "  storage_ready: %u", storage_ready ? 1U : 0U);
+	shell_print(shell, "  storage_full: %u", storage_full ? 1U : 0U);
+	shell_print(shell, "  stopped_on_invalid: %u", stopped_on_invalid ? 1U : 0U);
+
+	k_mutex_unlock(&field_log_storage_mutex);
+
+	if (err) {
+		shell_error(shell, "failed to count records: %d", err);
+	}
+
+	return err;
+}
+
+static void shell_print_battery_record(const struct shell *shell,
+				       const struct field_log_battery_summary_record *record)
+{
+	shell_print(shell,
+		    "%u,%u,%u,%u,%d,%d,%d,%u,%u,%u,%d,%d,%u,%u,%u,0x%02x",
+		    record->sequence,
+		    record->uptime_s,
+		    record->interval_s,
+		    record->sample_count,
+		    record->avg_current_ma,
+		    record->min_current_ma,
+		    record->max_current_ma,
+		    record->avg_voltage_mv,
+		    record->min_voltage_mv,
+		    record->last_voltage_mv,
+		    record->avg_temp_deci_c,
+		    record->net_energy_interval_uwh,
+		    record->discharge_energy_interval_uwh,
+		    record->discharge_energy_total_uwh,
+		    record->vbus_sample_count,
+		    record->flags);
+}
+
+static int cmd_fieldlog_dump(const struct shell *shell, size_t argc, char **argv)
+{
+	struct field_log_battery_summary_record record;
+	uint32_t count = 0;
+	int err = 0;
+
+	ARG_UNUSED(argc);
+	ARG_UNUSED(argv);
+
+	k_mutex_lock(&field_log_storage_mutex, K_FOREVER);
+
+	if (!field_log_storage_available()) {
+		k_mutex_unlock(&field_log_storage_mutex);
+		shell_error(shell, "field log storage is not available");
+		return -ENODEV;
+	}
+
+	shell_print(shell, "# fieldlog battery summary csv v1");
+	shell_print(shell,
+		    "seq,uptime_s,interval_s,samples,avg_current_ma,min_current_ma,max_current_ma,avg_voltage_mv,min_voltage_mv,last_voltage_mv,avg_temp_deci_c,net_energy_interval_uwh,discharge_energy_interval_uwh,discharge_energy_total_uwh,vbus_samples,flags");
+
+	for (off_t offset = 0; offset + sizeof(record) <= storage_capacity;
+	     offset += sizeof(record)) {
+		err = flash_area_read(storage_area, offset, &record, sizeof(record));
+		if (err) {
+			shell_error(shell, "read failed at 0x%lx: %d", (long)offset, err);
+			break;
+		}
+
+		if (record_is_erased(&record)) {
+			break;
+		}
+
+		if (!record_is_valid(&record)) {
+			shell_error(shell, "invalid record at 0x%lx; stopping dump",
+				    (long)offset);
+			break;
+		}
+
+		shell_print_battery_record(shell, &record);
+		count++;
+	}
+
+	shell_print(shell, "# records=%u", count);
+
+	k_mutex_unlock(&field_log_storage_mutex);
+
+	return err;
+}
+
+static int cmd_fieldlog_erase(const struct shell *shell, size_t argc, char **argv)
+{
+	int err;
+
+	ARG_UNUSED(argc);
+	ARG_UNUSED(argv);
+
+	k_mutex_lock(&field_log_storage_mutex, K_FOREVER);
+
+	if (!field_log_storage_available()) {
+		k_mutex_unlock(&field_log_storage_mutex);
+		shell_error(shell, "field log storage is not available");
+		return -ENODEV;
+	}
+
+	err = field_log_storage_erase_range();
+	if (err) {
+		k_mutex_unlock(&field_log_storage_mutex);
+		shell_error(shell, "erase failed: %d", err);
+		return err;
+	}
+
+	storage_write_offset = 0;
+	next_sequence = 0;
+	storage_full = false;
+	storage_ready = true;
+
+	k_mutex_unlock(&field_log_storage_mutex);
+
+	shell_print(shell, "field log erased");
+
+	return 0;
+}
+
+SHELL_STATIC_SUBCMD_SET_CREATE(fieldlog_cmds,
+	SHELL_CMD(info, NULL, "Show field log storage status", cmd_fieldlog_info),
+	SHELL_CMD(dump, NULL, "Dump battery summaries as CSV", cmd_fieldlog_dump),
+	SHELL_CMD(erase, NULL, "Erase field log storage", cmd_fieldlog_erase),
+	SHELL_SUBCMD_SET_END
+);
+
+SHELL_CMD_REGISTER(fieldlog, &fieldlog_cmds, "Field log commands", NULL);
+#endif
