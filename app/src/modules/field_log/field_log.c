@@ -5,9 +5,11 @@
  */
 
 #include "field_log.h"
-#include "app_zbus.h"
+
+#include "app_events.h"
 
 #include <errno.h>
+#include <limits.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
@@ -16,8 +18,9 @@
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
 #include <zephyr/storage/flash_map.h>
+#include <zephyr/sys/atomic.h>
+#include <zephyr/sys/printk.h>
 #include <zephyr/sys/util.h>
-#include <zephyr/zbus/zbus.h>
 
 #if defined(CONFIG_APP_FIELD_LOG_SHELL)
 #include <zephyr/shell/shell.h>
@@ -27,55 +30,87 @@ LOG_MODULE_REGISTER(field_log, LOG_LEVEL_INF);
 
 #define FIELD_LOG_STACK_SIZE 1536
 #define FIELD_LOG_PRIORITY 8
+#define FIELD_LOG_MSGQ_LEN 24
 
 #define FIELD_LOG_RECORD_MAGIC 0x464cU
-#define FIELD_LOG_RECORD_VERSION 1U
-#define FIELD_LOG_RECORD_TYPE_BATTERY_SUMMARY 1U
-#define FIELD_LOG_RECORD_SIZE 64U
+#define FIELD_LOG_RECORD_VERSION 2U
+#define FIELD_LOG_RECORD_SIZE 32U
 
-#define FIELD_LOG_FLAG_NO_SAMPLES BIT(0)
-#define FIELD_LOG_FLAG_STORAGE_DISABLED BIT(1)
-#define FIELD_LOG_FLAG_VBUS_SEEN BIT(2)
-#define FIELD_LOG_CSV_HEADER \
-	"seq,uptime_s,interval_s,samples,avg_current_ma,min_current_ma,max_current_ma," \
-	"avg_voltage_mv,min_voltage_mv,last_voltage_mv,avg_temp_deci_c," \
-	"net_energy_interval_uwh,discharge_energy_interval_uwh," \
-	"discharge_energy_total_uwh,vbus_samples,flags"
+#define FIELD_LOG_COORDINATE_SCALE 1000000
+#define FIELD_LOG_LOCATION_STALE_MS (20 * 60 * 1000LL)
+#define FIELD_LOG_LOCATION_REFRESH_GRACE_MS (2 * 60 * 1000LL)
+#define FIELD_LOG_LOCATION_ACCURACY_UNKNOWN UINT16_MAX
+#define FIELD_LOG_RSRP_UNKNOWN INT16_MIN
 
-struct field_log_battery_summary_record {
+#define FIELD_LOG_SUMMARY_FLAG_NO_BATTERY_SAMPLES BIT(0)
+#define FIELD_LOG_SUMMARY_FLAG_VBUS_SEEN BIT(1)
+#define FIELD_LOG_SUMMARY_FLAG_STORAGE_DISABLED BIT(2)
+
+#define FIELD_LOG_CSV_HEADER                                                        \
+	"type,seq,uptime_s,from_state,to_state,reason,active_rat,next_rat,"        \
+	"location_source,latitude,longitude,accuracy_m,last_rsrp_dbm,"             \
+	"interval_s,power_interval_uwh,power_total_uwh,lte_losses_interval,"       \
+	"lte_losses_total,switchbacks_interval,switchbacks_total,flags,"           \
+	"dropped_messages"
+
+enum field_log_record_type {
+	FIELD_LOG_RECORD_TYPE_STATE_CHANGE = 1,
+	FIELD_LOG_RECORD_TYPE_SUMMARY = 2,
+};
+
+enum field_log_message_type {
+	FIELD_LOG_MSG_BATTERY_SAMPLE = 1,
+	FIELD_LOG_MSG_LOCATION_UPDATE,
+	FIELD_LOG_MSG_STATE_CHANGE,
+};
+
+enum field_log_slot_state {
+	FIELD_LOG_SLOT_VALID,
+	FIELD_LOG_SLOT_EMPTY,
+	FIELD_LOG_SLOT_INVALID,
+};
+
+struct field_log_record_header {
 	uint16_t magic;
 	uint8_t version;
 	uint8_t type;
 	uint32_t sequence;
 	uint32_t uptime_s;
-	uint16_t interval_s;
-	uint16_t sample_count;
-	int16_t avg_current_ma;
-	int16_t min_current_ma;
-	int16_t max_current_ma;
-	uint16_t avg_voltage_mv;
-	uint16_t min_voltage_mv;
-	uint16_t last_voltage_mv;
-	int16_t avg_temp_deci_c;
-	int32_t net_energy_interval_uwh;
-	uint32_t discharge_energy_interval_uwh;
-	uint32_t discharge_energy_total_uwh;
-	uint8_t vbus_sample_count;
-	uint8_t flags;
-	uint16_t reserved0;
-	uint32_t reserved1;
-	uint8_t reserved2[12];
-	uint16_t crc16;
 } __packed;
 
-BUILD_ASSERT(sizeof(struct field_log_battery_summary_record) == FIELD_LOG_RECORD_SIZE);
-BUILD_ASSERT((CONFIG_APP_FIELD_LOG_ERASE_BLOCK_SIZE % FIELD_LOG_RECORD_SIZE) == 0);
+struct field_log_state_record_payload {
+	uint8_t from_state;
+	uint8_t to_state;
+	uint8_t reason_evt;
+	uint8_t active_rat;
+	uint8_t next_rat;
+	uint8_t location_source;
+	int16_t last_rsrp_dbm;
+	int32_t latitude_e6;
+	int32_t longitude_e6;
+	uint16_t accuracy_m;
+} __packed;
 
-ZBUS_MSG_SUBSCRIBER_DEFINE(field_log_batt_sub);
+struct field_log_summary_record_payload {
+	uint16_t interval_s;
+	uint32_t power_total_uwh;
+	uint32_t power_interval_uwh;
+	uint16_t lte_losses_total;
+	uint8_t lte_losses_interval;
+	uint16_t switchbacks_total;
+	uint8_t switchbacks_interval;
+	uint8_t flags;
+	uint8_t dropped_messages;
+} __packed;
 
-union field_log_msg {
-	struct app_battery_sample battery;
-};
+struct field_log_record {
+	struct field_log_record_header header;
+	union {
+		struct field_log_state_record_payload state;
+		struct field_log_summary_record_payload summary;
+	} payload;
+	uint16_t crc16;
+} __packed;
 
 struct field_log_storage_state {
 	const struct flash_area *area;
@@ -90,34 +125,77 @@ struct field_log_battery_accumulator {
 	bool have_last_sample;
 	struct app_battery_sample last_sample;
 	int64_t last_energy_timestamp_ms;
-	int64_t summary_start_ms;
 	uint32_t sample_count;
 	uint32_t vbus_sample_count;
-	int64_t voltage_sum_mv;
-	int64_t current_sum_ma;
-	int64_t temp_sum_mdegc;
-	int64_t min_voltage_mv;
-	int64_t min_current_ma;
-	int64_t max_current_ma;
-	int64_t net_energy_interval_uwh;
 	int64_t discharge_energy_interval_uwh;
 	int64_t discharge_energy_total_uwh;
 };
 
-enum field_log_slot_state {
-	FIELD_LOG_SLOT_VALID,
-	FIELD_LOG_SLOT_EMPTY,
-	FIELD_LOG_SLOT_INVALID,
+struct field_log_location_sample {
+	bool valid;
+	enum field_log_location_source source;
+	int64_t timestamp_ms;
+	int32_t latitude_e6;
+	int32_t longitude_e6;
+	uint16_t accuracy_m;
 };
+
+struct field_log_runtime_state {
+	int64_t summary_start_ms;
+	struct field_log_battery_accumulator battery;
+	struct field_log_location_sample locations[FIELD_LOG_LOCATION_AGNSS + 1];
+	uint16_t lte_losses_total;
+	uint8_t lte_losses_interval;
+	uint16_t switchbacks_total;
+	uint8_t switchbacks_interval;
+};
+
+struct field_log_battery_message {
+	struct app_battery_sample sample;
+};
+
+struct field_log_location_message {
+	enum field_log_location_source source;
+	int64_t timestamp_ms;
+	int32_t latitude_e6;
+	int32_t longitude_e6;
+	uint16_t accuracy_m;
+};
+
+struct field_log_state_change_message {
+	enum app_state from_state;
+	enum app_state to_state;
+	enum app_evt_type reason_evt;
+	enum rat active_rat;
+	enum rat next_rat;
+	int16_t last_rsrp_dbm;
+	int64_t timestamp_ms;
+};
+
+struct field_log_message {
+	enum field_log_message_type type;
+	union {
+		struct field_log_battery_message battery;
+		struct field_log_location_message location;
+		struct field_log_state_change_message state;
+	} data;
+};
+
+BUILD_ASSERT(sizeof(struct field_log_state_record_payload) == 18);
+BUILD_ASSERT(sizeof(struct field_log_summary_record_payload) == 18);
+BUILD_ASSERT(sizeof(struct field_log_record) == FIELD_LOG_RECORD_SIZE);
+BUILD_ASSERT((CONFIG_APP_FIELD_LOG_ERASE_BLOCK_SIZE % FIELD_LOG_RECORD_SIZE) == 0);
 
 static K_THREAD_STACK_DEFINE(field_log_stack, FIELD_LOG_STACK_SIZE);
 static struct k_thread field_log_thread_data;
 static bool field_log_started;
 
+K_MSGQ_DEFINE(field_log_msgq, sizeof(struct field_log_message), FIELD_LOG_MSGQ_LEN, 4);
 K_MUTEX_DEFINE(field_log_storage_mutex);
 
 static struct field_log_storage_state storage;
-static struct field_log_battery_accumulator battery_accum;
+static struct field_log_runtime_state runtime;
+static atomic_t field_log_dropped_messages;
 
 static uint16_t crc16_ccitt(const uint8_t *data, size_t len)
 {
@@ -138,7 +216,7 @@ static uint16_t crc16_ccitt(const uint8_t *data, size_t len)
 	return crc;
 }
 
-static bool record_is_erased(const struct field_log_battery_summary_record *record)
+static bool record_is_erased(const struct field_log_record *record)
 {
 	const uint8_t *bytes = (const uint8_t *)record;
 
@@ -151,18 +229,24 @@ static bool record_is_erased(const struct field_log_battery_summary_record *reco
 	return true;
 }
 
-static bool record_is_valid(const struct field_log_battery_summary_record *record)
+static bool record_type_is_valid(uint8_t type)
+{
+	return type == FIELD_LOG_RECORD_TYPE_STATE_CHANGE ||
+	       type == FIELD_LOG_RECORD_TYPE_SUMMARY;
+}
+
+static bool record_is_valid(const struct field_log_record *record)
 {
 	uint16_t expected_crc;
 
-	if (record->magic != FIELD_LOG_RECORD_MAGIC ||
-	    record->version != FIELD_LOG_RECORD_VERSION ||
-	    record->type != FIELD_LOG_RECORD_TYPE_BATTERY_SUMMARY) {
+	if (record->header.magic != FIELD_LOG_RECORD_MAGIC ||
+	    record->header.version != FIELD_LOG_RECORD_VERSION ||
+	    !record_type_is_valid(record->header.type)) {
 		return false;
 	}
 
 	expected_crc = crc16_ccitt((const uint8_t *)record,
-				  offsetof(struct field_log_battery_summary_record, crc16));
+				   offsetof(struct field_log_record, crc16));
 
 	return record->crc16 == expected_crc;
 }
@@ -200,6 +284,27 @@ static uint32_t clamp_u32(int64_t value)
 	return (uint32_t)clamp_i64(value, 0, UINT32_MAX);
 }
 
+static int32_t degrees_to_e6(double degrees)
+{
+	double scaled = degrees * FIELD_LOG_COORDINATE_SCALE;
+	double rounded = scaled >= 0.0 ? scaled + 0.5 : scaled - 0.5;
+
+	return clamp_s32((int64_t)rounded);
+}
+
+static uint16_t accuracy_to_u16(float accuracy_m)
+{
+	if (accuracy_m <= 0.0f) {
+		return FIELD_LOG_LOCATION_ACCURACY_UNKNOWN;
+	}
+
+	if (accuracy_m >= (float)(UINT16_MAX - 1U)) {
+		return UINT16_MAX - 1U;
+	}
+
+	return (uint16_t)(accuracy_m + 0.5f);
+}
+
 static bool field_log_storage_available(void)
 {
 	return storage.area != NULL && storage.capacity_bytes >= FIELD_LOG_RECORD_SIZE;
@@ -213,7 +318,7 @@ static void field_log_storage_reset_cursor(void)
 }
 
 static int field_log_storage_read_slot(off_t offset,
-				       struct field_log_battery_summary_record *record,
+				       struct field_log_record *record,
 				       enum field_log_slot_state *slot_state)
 {
 	int err = flash_area_read(storage.area, offset, record, sizeof(*record));
@@ -256,7 +361,7 @@ static int field_log_storage_erase_all(void)
 
 static int field_log_storage_scan(void)
 {
-	struct field_log_battery_summary_record record;
+	struct field_log_record record;
 	enum field_log_slot_state slot_state;
 
 	field_log_storage_reset_cursor();
@@ -264,6 +369,7 @@ static int field_log_storage_scan(void)
 	for (off_t offset = 0; offset + sizeof(record) <= storage.capacity_bytes;
 	     offset += sizeof(record)) {
 		int err = field_log_storage_read_slot(offset, &record, &slot_state);
+
 		if (err) {
 			return err;
 		}
@@ -274,13 +380,14 @@ static int field_log_storage_scan(void)
 		}
 
 		if (slot_state == FIELD_LOG_SLOT_INVALID) {
-			LOG_WRN("Field log scan stopped at invalid record 0x%lx", (long)offset);
+			LOG_WRN("Field log scan stopped at invalid record 0x%lx",
+				(long)offset);
 			storage.full = true;
 			storage.write_offset = offset;
 			return -EBADMSG;
 		}
 
-		storage.next_sequence = record.sequence + 1U;
+		storage.next_sequence = record.header.sequence + 1U;
 		storage.write_offset = offset + sizeof(record);
 	}
 
@@ -304,9 +411,10 @@ static int field_log_storage_init(void)
 
 	storage.capacity_bytes = MIN((size_t)storage.area->fa_size,
 				     (size_t)CONFIG_APP_FIELD_LOG_STORAGE_BYTES);
-	storage.capacity_bytes -= storage.capacity_bytes % CONFIG_APP_FIELD_LOG_ERASE_BLOCK_SIZE;
+	storage.capacity_bytes -= storage.capacity_bytes %
+				  CONFIG_APP_FIELD_LOG_ERASE_BLOCK_SIZE;
 
-	if (storage.capacity_bytes < sizeof(struct field_log_battery_summary_record)) {
+	if (storage.capacity_bytes < sizeof(struct field_log_record)) {
 		LOG_WRN("Field log storage disabled: capacity too small");
 		return -ENOSPC;
 	}
@@ -320,7 +428,7 @@ static int field_log_storage_init(void)
 
 	err = field_log_storage_scan();
 	if ((err == -EBADMSG) && (storage.write_offset == 0)) {
-		LOG_WRN("Field log storage has no valid first record; erasing prototype area");
+		LOG_WRN("Field log storage has no valid first record; erasing area");
 		storage.full = false;
 
 		err = field_log_storage_erase_all();
@@ -332,7 +440,7 @@ static int field_log_storage_init(void)
 	}
 
 	if (err == -EBADMSG) {
-		LOG_WRN("Field log append disabled to preserve existing corrupted data");
+		LOG_WRN("Field log append disabled to preserve corrupted data");
 		return err;
 	}
 
@@ -353,7 +461,7 @@ static int field_log_storage_init(void)
 #endif
 }
 
-static int field_log_storage_append_record(const struct field_log_battery_summary_record *record)
+static int field_log_storage_append_record(const struct field_log_record *record)
 {
 	int err;
 
@@ -386,59 +494,49 @@ static int field_log_storage_append_record(const struct field_log_battery_summar
 	}
 
 	storage.write_offset += sizeof(*record);
+	storage.next_sequence++;
 
 	return 0;
 }
 
-static void battery_accumulator_reset_interval(int64_t start_ms)
+static void field_log_runtime_reset_interval(int64_t start_ms)
 {
-	battery_accum.summary_start_ms = start_ms;
-	battery_accum.sample_count = 0;
-	battery_accum.vbus_sample_count = 0;
-	battery_accum.voltage_sum_mv = 0;
-	battery_accum.current_sum_ma = 0;
-	battery_accum.temp_sum_mdegc = 0;
-	battery_accum.min_voltage_mv = INT64_MAX;
-	battery_accum.min_current_ma = INT64_MAX;
-	battery_accum.max_current_ma = INT64_MIN;
-	battery_accum.net_energy_interval_uwh = 0;
-	battery_accum.discharge_energy_interval_uwh = 0;
+	runtime.summary_start_ms = start_ms;
+	runtime.battery.sample_count = 0;
+	runtime.battery.vbus_sample_count = 0;
+	runtime.battery.discharge_energy_interval_uwh = 0;
+	runtime.lte_losses_interval = 0;
+	runtime.switchbacks_interval = 0;
 }
 
 static void battery_accumulator_integrate_until(int64_t timestamp_ms)
 {
 	int64_t delta_ms;
-	int64_t net_energy_uwh;
 	int64_t discharge_energy_uwh;
 
-	if (!battery_accum.have_last_sample) {
+	if (!runtime.battery.have_last_sample) {
 		return;
 	}
 
-	if (timestamp_ms <= battery_accum.last_energy_timestamp_ms) {
+	if (timestamp_ms <= runtime.battery.last_energy_timestamp_ms) {
 		return;
 	}
 
-	delta_ms = timestamp_ms - battery_accum.last_energy_timestamp_ms;
-	net_energy_uwh = (battery_accum.last_sample.voltage_mv *
-			  battery_accum.last_sample.current_ma *
-			  delta_ms) / 3600000LL;
+	delta_ms = timestamp_ms - runtime.battery.last_energy_timestamp_ms;
 
-	battery_accum.net_energy_interval_uwh += net_energy_uwh;
-
-	/* Battery API convention: negative current means discharging. */
-	if (battery_accum.last_sample.current_ma < 0) {
-		discharge_energy_uwh = (battery_accum.last_sample.voltage_mv *
-					-battery_accum.last_sample.current_ma *
-					delta_ms) / 3600000LL;
-		battery_accum.discharge_energy_interval_uwh += discharge_energy_uwh;
-		battery_accum.discharge_energy_total_uwh += discharge_energy_uwh;
+	if (runtime.battery.last_sample.current_ma < 0) {
+		discharge_energy_uwh =
+			(runtime.battery.last_sample.voltage_mv *
+			 -runtime.battery.last_sample.current_ma *
+			 delta_ms) / 3600000LL;
+		runtime.battery.discharge_energy_interval_uwh += discharge_energy_uwh;
+		runtime.battery.discharge_energy_total_uwh += discharge_energy_uwh;
 	}
 
-	battery_accum.last_energy_timestamp_ms = timestamp_ms;
+	runtime.battery.last_energy_timestamp_ms = timestamp_ms;
 }
 
-static void battery_accumulator_add_sample(const struct app_battery_sample *sample)
+static void field_log_process_battery_sample(const struct app_battery_sample *sample)
 {
 	int64_t sample_time_ms = sample->timestamp_ms;
 
@@ -448,168 +546,487 @@ static void battery_accumulator_add_sample(const struct app_battery_sample *samp
 
 	battery_accumulator_integrate_until(sample_time_ms);
 
-	battery_accum.have_last_sample = true;
-	battery_accum.last_sample = *sample;
-	battery_accum.last_sample.timestamp_ms = sample_time_ms;
-	battery_accum.last_energy_timestamp_ms = sample_time_ms;
-
-	battery_accum.sample_count++;
-	battery_accum.voltage_sum_mv += sample->voltage_mv;
-	battery_accum.current_sum_ma += sample->current_ma;
-	battery_accum.temp_sum_mdegc += sample->temp_mdegc;
-	battery_accum.min_voltage_mv = MIN(battery_accum.min_voltage_mv, sample->voltage_mv);
-	battery_accum.min_current_ma = MIN(battery_accum.min_current_ma, sample->current_ma);
-	battery_accum.max_current_ma = MAX(battery_accum.max_current_ma, sample->current_ma);
+	runtime.battery.have_last_sample = true;
+	runtime.battery.last_sample = *sample;
+	runtime.battery.last_sample.timestamp_ms = sample_time_ms;
+	runtime.battery.last_energy_timestamp_ms = sample_time_ms;
+	runtime.battery.sample_count++;
 
 	if (sample->vbus_present) {
-		battery_accum.vbus_sample_count++;
+		runtime.battery.vbus_sample_count++;
 	}
 }
 
-static uint8_t battery_summary_flags(uint32_t sample_count)
+static int field_log_location_source_rank(enum field_log_location_source source)
+{
+	switch (source) {
+	case FIELD_LOG_LOCATION_AGNSS:
+		return 4;
+	case FIELD_LOG_LOCATION_GNSS:
+		return 3;
+	case FIELD_LOG_LOCATION_LTE:
+		return 1;
+	case FIELD_LOG_LOCATION_NONE:
+	default:
+		return 0;
+	}
+}
+
+static bool field_log_location_is_stale(const struct field_log_location_sample *sample,
+					int64_t now_ms)
+{
+	if (!sample->valid) {
+		return true;
+	}
+
+	return now_ms - sample->timestamp_ms > FIELD_LOG_LOCATION_STALE_MS;
+}
+
+static bool field_log_accuracy_is_known(const struct field_log_location_sample *sample)
+{
+	return sample->accuracy_m != FIELD_LOG_LOCATION_ACCURACY_UNKNOWN;
+}
+
+static const struct field_log_location_sample *field_log_select_best_location(int64_t now_ms)
+{
+	const struct field_log_location_sample *best = NULL;
+
+	for (size_t i = FIELD_LOG_LOCATION_LTE; i <= FIELD_LOG_LOCATION_AGNSS; i++) {
+		const struct field_log_location_sample *candidate = &runtime.locations[i];
+		bool candidate_stale;
+		bool best_stale;
+
+		if (!candidate->valid) {
+			continue;
+		}
+
+		if (best == NULL) {
+			best = candidate;
+			continue;
+		}
+
+		candidate_stale = field_log_location_is_stale(candidate, now_ms);
+		best_stale = field_log_location_is_stale(best, now_ms);
+
+		if (candidate_stale != best_stale) {
+			if (!candidate_stale) {
+				best = candidate;
+			}
+			continue;
+		}
+
+		if (field_log_accuracy_is_known(candidate) &&
+		    field_log_accuracy_is_known(best)) {
+			if (candidate->accuracy_m + 25U < best->accuracy_m) {
+				best = candidate;
+				continue;
+			}
+
+			if (best->accuracy_m + 25U < candidate->accuracy_m) {
+				continue;
+			}
+		} else if (field_log_accuracy_is_known(candidate) !=
+			   field_log_accuracy_is_known(best)) {
+			if (field_log_accuracy_is_known(candidate)) {
+				best = candidate;
+			}
+			continue;
+		}
+
+		if (candidate->timestamp_ms >
+		    best->timestamp_ms + FIELD_LOG_LOCATION_REFRESH_GRACE_MS) {
+			best = candidate;
+			continue;
+		}
+
+		if (best->timestamp_ms >
+		    candidate->timestamp_ms + FIELD_LOG_LOCATION_REFRESH_GRACE_MS) {
+			continue;
+		}
+
+		if (field_log_location_source_rank(candidate->source) >
+		    field_log_location_source_rank(best->source)) {
+			best = candidate;
+			continue;
+		}
+
+		if (candidate->timestamp_ms > best->timestamp_ms) {
+			best = candidate;
+		}
+	}
+
+	return best;
+}
+
+static void field_log_process_location_update(const struct field_log_location_message *update)
+{
+	struct field_log_location_sample *slot;
+
+	if (update->source <= FIELD_LOG_LOCATION_NONE ||
+	    update->source > FIELD_LOG_LOCATION_AGNSS) {
+		return;
+	}
+
+	slot = &runtime.locations[update->source];
+	slot->valid = true;
+	slot->source = update->source;
+	slot->timestamp_ms = update->timestamp_ms;
+	slot->latitude_e6 = update->latitude_e6;
+	slot->longitude_e6 = update->longitude_e6;
+	slot->accuracy_m = update->accuracy_m;
+}
+
+static bool transition_counts_as_lte_loss(const struct field_log_state_change_message *change)
+{
+	if (change->to_state != STATE_BACKOFF) {
+		return false;
+	}
+
+	return change->from_state == STATE_LTEM_CONNECTING ||
+	       change->from_state == STATE_LTEM_CONNECTED;
+}
+
+static bool transition_counts_as_switchback(const struct field_log_state_change_message *change)
+{
+	if (change->to_state != STATE_LTEM_CONNECTED) {
+		return false;
+	}
+
+	return change->from_state == STATE_LTE_PROBE ||
+	       change->active_rat == RAT_NTN;
+}
+
+static uint8_t summary_flags(void)
 {
 	uint8_t flags = 0;
 
-	if (sample_count == 0U) {
-		flags |= FIELD_LOG_FLAG_NO_SAMPLES;
+	if (runtime.battery.sample_count == 0U) {
+		flags |= FIELD_LOG_SUMMARY_FLAG_NO_BATTERY_SAMPLES;
+	}
+
+	if (runtime.battery.vbus_sample_count > 0U) {
+		flags |= FIELD_LOG_SUMMARY_FLAG_VBUS_SEEN;
 	}
 
 	if (!storage.ready) {
-		flags |= FIELD_LOG_FLAG_STORAGE_DISABLED;
-	}
-
-	if (battery_accum.vbus_sample_count > 0U) {
-		flags |= FIELD_LOG_FLAG_VBUS_SEEN;
+		flags |= FIELD_LOG_SUMMARY_FLAG_STORAGE_DISABLED;
 	}
 
 	return flags;
 }
 
-static void battery_summary_build_record(struct field_log_battery_summary_record *record,
-					 int64_t now_ms)
+static void field_log_fill_record_header(struct field_log_record *record,
+					 enum field_log_record_type type,
+					 int64_t uptime_ms)
 {
-	uint32_t sample_count = battery_accum.sample_count;
-	int64_t interval_ms = now_ms - battery_accum.summary_start_ms;
-
 	memset(record, 0, sizeof(*record));
-
-	record->magic = FIELD_LOG_RECORD_MAGIC;
-	record->version = FIELD_LOG_RECORD_VERSION;
-	record->type = FIELD_LOG_RECORD_TYPE_BATTERY_SUMMARY;
-	record->sequence = storage.next_sequence;
-	record->uptime_s = clamp_u32(now_ms / 1000);
-	record->interval_s = clamp_u16(interval_ms / 1000);
-	record->sample_count = clamp_u16(sample_count);
-	record->flags = battery_summary_flags(sample_count);
-	record->vbus_sample_count = clamp_u16(battery_accum.vbus_sample_count);
-
-	if (sample_count > 0) {
-		record->avg_current_ma = clamp_s16(battery_accum.current_sum_ma / sample_count);
-		record->min_current_ma = clamp_s16(battery_accum.min_current_ma);
-		record->max_current_ma = clamp_s16(battery_accum.max_current_ma);
-		record->avg_voltage_mv = clamp_u16(battery_accum.voltage_sum_mv / sample_count);
-		record->min_voltage_mv = clamp_u16(battery_accum.min_voltage_mv);
-		record->last_voltage_mv = clamp_u16(battery_accum.last_sample.voltage_mv);
-		record->avg_temp_deci_c =
-			clamp_s16((battery_accum.temp_sum_mdegc / sample_count) / 100);
-	}
-
-	record->net_energy_interval_uwh = clamp_s32(battery_accum.net_energy_interval_uwh);
-	record->discharge_energy_interval_uwh =
-		clamp_u32(battery_accum.discharge_energy_interval_uwh);
-	record->discharge_energy_total_uwh =
-		clamp_u32(battery_accum.discharge_energy_total_uwh);
-	record->crc16 = crc16_ccitt((const uint8_t *)record,
-				    offsetof(struct field_log_battery_summary_record, crc16));
+	record->header.magic = FIELD_LOG_RECORD_MAGIC;
+	record->header.version = FIELD_LOG_RECORD_VERSION;
+	record->header.type = type;
+	record->header.sequence = storage.next_sequence;
+	record->header.uptime_s = clamp_u32(uptime_ms / 1000LL);
 }
 
-static void battery_summary_log(const struct field_log_battery_summary_record *record)
+static void field_log_append_current_record(const struct field_log_record *record,
+					    const char *kind)
 {
-	if (record->sample_count == 0) {
-		LOG_WRN("Field log battery summary #%u: no samples, flags=0x%02x",
-			record->sequence, record->flags);
+	int err;
+
+	k_mutex_lock(&field_log_storage_mutex, K_FOREVER);
+	err = field_log_storage_append_record(record);
+	k_mutex_unlock(&field_log_storage_mutex);
+
+	if (err == -ENODEV || err == -ENOSPC) {
 		return;
 	}
 
-	LOG_INF("Field log battery summary #%u: samples=%u avg=%d mA min/max=%d/%d mA voltage avg/min/last=%u/%u/%u mV net=%d uWh discharge=%u/%u uWh vbus=%u flags=0x%02x",
-		record->sequence,
-		record->sample_count,
-		record->avg_current_ma,
-		record->min_current_ma,
-		record->max_current_ma,
-		record->avg_voltage_mv,
-		record->min_voltage_mv,
-		record->last_voltage_mv,
-		record->net_energy_interval_uwh,
-		record->discharge_energy_interval_uwh,
-		record->discharge_energy_total_uwh,
-		record->vbus_sample_count,
-		record->flags);
+	if (err) {
+		LOG_WRN("Field log %s record was not persisted: %d", kind, err);
+	}
 }
 
-static void battery_summary_finalize_interval(void)
+static void field_log_format_coordinate(char *buffer, size_t len, int32_t value_e6)
 {
-	struct field_log_battery_summary_record record;
+	int32_t whole = value_e6 / FIELD_LOG_COORDINATE_SCALE;
+	int32_t remainder = value_e6 % FIELD_LOG_COORDINATE_SCALE;
+	uint32_t fraction = (uint32_t)(remainder < 0 ? -remainder : remainder);
+
+	snprintk(buffer, len, "%d.%06u", whole, fraction);
+}
+
+static const char *field_log_location_source_name(enum field_log_location_source source)
+{
+	switch (source) {
+	case FIELD_LOG_LOCATION_LTE:
+		return "lte";
+	case FIELD_LOG_LOCATION_GNSS:
+		return "gnss";
+	case FIELD_LOG_LOCATION_AGNSS:
+		return "agnss";
+	case FIELD_LOG_LOCATION_NONE:
+	default:
+		return "none";
+	}
+}
+
+static const char *field_log_state_name(enum app_state state)
+{
+	switch (state) {
+	case STATE_BOOT:
+		return "STATE_BOOT";
+	case STATE_IDLE:
+		return "STATE_IDLE";
+	case STATE_GNSS_ACQUIRE:
+		return "STATE_GNSS_ACQUIRE";
+	case STATE_NTN_CONNECTING:
+		return "STATE_NTN_CONNECTING";
+	case STATE_NTN_CONNECTED:
+		return "STATE_NTN_CONNECTED";
+	case STATE_LTEM_CONNECTING:
+		return "STATE_LTEM_CONNECTING";
+	case STATE_LTEM_CONNECTED:
+		return "STATE_LTEM_CONNECTED";
+	case STATE_CLOUD_CONNECTING:
+		return "STATE_CLOUD_CONNECTING";
+	case STATE_LTE_LOCATION:
+		return "STATE_LTE_LOCATION";
+	case STATE_LTE_PROBE:
+		return "STATE_LTE_PROBE";
+	case STATE_BACKOFF:
+		return "STATE_BACKOFF";
+	default:
+		return "STATE_UNKNOWN";
+	}
+}
+
+static const char *field_log_rat_name(enum rat rat)
+{
+	switch (rat) {
+	case RAT_LTEM:
+		return "LTE-M";
+	case RAT_NTN:
+		return "NTN";
+	default:
+		return "UNKNOWN";
+	}
+}
+
+static void field_log_log_state_record(const struct field_log_record *record)
+{
+	char latitude[20];
+	char longitude[20];
+	const struct field_log_state_record_payload *payload = &record->payload.state;
+
+	if (payload->location_source != FIELD_LOG_LOCATION_NONE &&
+	    payload->accuracy_m != FIELD_LOG_LOCATION_ACCURACY_UNKNOWN) {
+		field_log_format_coordinate(latitude, sizeof(latitude), payload->latitude_e6);
+		field_log_format_coordinate(longitude, sizeof(longitude), payload->longitude_e6);
+
+		LOG_INF("Field log state #%u: %s -> %s reason=%s rat=%s/%s loc=%s %s,%s acc=%u m rsrp=%d dBm",
+			record->header.sequence,
+			field_log_state_name(payload->from_state),
+			field_log_state_name(payload->to_state),
+			app_evt_name(payload->reason_evt),
+			field_log_rat_name(payload->active_rat),
+			field_log_rat_name(payload->next_rat),
+			field_log_location_source_name(payload->location_source),
+			latitude,
+			longitude,
+			payload->accuracy_m,
+			payload->last_rsrp_dbm);
+		return;
+	}
+
+	if (payload->location_source != FIELD_LOG_LOCATION_NONE) {
+		field_log_format_coordinate(latitude, sizeof(latitude), payload->latitude_e6);
+		field_log_format_coordinate(longitude, sizeof(longitude), payload->longitude_e6);
+
+		LOG_INF("Field log state #%u: %s -> %s reason=%s rat=%s/%s loc=%s %s,%s acc=unknown rsrp=%d dBm",
+			record->header.sequence,
+			field_log_state_name(payload->from_state),
+			field_log_state_name(payload->to_state),
+			app_evt_name(payload->reason_evt),
+			field_log_rat_name(payload->active_rat),
+			field_log_rat_name(payload->next_rat),
+			field_log_location_source_name(payload->location_source),
+			latitude,
+			longitude,
+			payload->last_rsrp_dbm);
+		return;
+	}
+
+	LOG_INF("Field log state #%u: %s -> %s reason=%s rat=%s/%s loc=none rsrp=%d dBm",
+		record->header.sequence,
+		field_log_state_name(payload->from_state),
+		field_log_state_name(payload->to_state),
+		app_evt_name(payload->reason_evt),
+		field_log_rat_name(payload->active_rat),
+		field_log_rat_name(payload->next_rat),
+		payload->last_rsrp_dbm);
+}
+
+static void field_log_process_state_change(const struct field_log_state_change_message *change)
+{
+	struct field_log_record record;
+	const struct field_log_location_sample *best_location;
+
+	if (transition_counts_as_lte_loss(change)) {
+		runtime.lte_losses_total = clamp_u16(runtime.lte_losses_total + 1U);
+		runtime.lte_losses_interval =
+			(uint8_t)MIN((uint16_t)UINT8_MAX,
+				     (uint16_t)(runtime.lte_losses_interval + 1U));
+	}
+
+	if (transition_counts_as_switchback(change)) {
+		runtime.switchbacks_total =
+			clamp_u16(runtime.switchbacks_total + 1U);
+		runtime.switchbacks_interval =
+			(uint8_t)MIN((uint16_t)UINT8_MAX,
+				     (uint16_t)(runtime.switchbacks_interval + 1U));
+	}
+
+	field_log_fill_record_header(&record, FIELD_LOG_RECORD_TYPE_STATE_CHANGE,
+				     change->timestamp_ms);
+
+	record.payload.state.from_state = change->from_state;
+	record.payload.state.to_state = change->to_state;
+	record.payload.state.reason_evt = change->reason_evt;
+	record.payload.state.active_rat = change->active_rat;
+	record.payload.state.next_rat = change->next_rat;
+	record.payload.state.last_rsrp_dbm = change->last_rsrp_dbm;
+
+	best_location = field_log_select_best_location(change->timestamp_ms);
+	if (best_location != NULL) {
+		record.payload.state.location_source = best_location->source;
+		record.payload.state.latitude_e6 = best_location->latitude_e6;
+		record.payload.state.longitude_e6 = best_location->longitude_e6;
+		record.payload.state.accuracy_m = best_location->accuracy_m;
+	} else {
+		record.payload.state.location_source = FIELD_LOG_LOCATION_NONE;
+		record.payload.state.accuracy_m = FIELD_LOG_LOCATION_ACCURACY_UNKNOWN;
+	}
+
+	record.crc16 = crc16_ccitt((const uint8_t *)&record,
+				   offsetof(struct field_log_record, crc16));
+
+	field_log_log_state_record(&record);
+	field_log_append_current_record(&record, "state");
+}
+
+static void field_log_log_summary_record(const struct field_log_record *record)
+{
+	const struct field_log_summary_record_payload *payload = &record->payload.summary;
+
+	LOG_INF("Field log summary #%u: interval=%u s power=%u/%u uWh lte_losses=%u/%u switchbacks=%u/%u flags=0x%02x dropped=%u",
+		record->header.sequence,
+		payload->interval_s,
+		payload->power_interval_uwh,
+		payload->power_total_uwh,
+		payload->lte_losses_interval,
+		payload->lte_losses_total,
+		payload->switchbacks_interval,
+		payload->switchbacks_total,
+		payload->flags,
+		payload->dropped_messages);
+}
+
+static void field_log_finalize_summary(void)
+{
+	struct field_log_record record;
 	int64_t now_ms = k_uptime_get();
-	int err;
+	int64_t interval_ms = now_ms - runtime.summary_start_ms;
+	uint8_t dropped_messages =
+		(uint8_t)MIN((atomic_val_t)UINT8_MAX,
+			     atomic_set(&field_log_dropped_messages, 0));
 
 	battery_accumulator_integrate_until(now_ms);
 
-	k_mutex_lock(&field_log_storage_mutex, K_FOREVER);
+	field_log_fill_record_header(&record, FIELD_LOG_RECORD_TYPE_SUMMARY, now_ms);
+	record.payload.summary.interval_s = clamp_u16(interval_ms / 1000LL);
+	record.payload.summary.power_total_uwh =
+		clamp_u32(runtime.battery.discharge_energy_total_uwh);
+	record.payload.summary.power_interval_uwh =
+		clamp_u32(runtime.battery.discharge_energy_interval_uwh);
+	record.payload.summary.lte_losses_total = runtime.lte_losses_total;
+	record.payload.summary.lte_losses_interval = runtime.lte_losses_interval;
+	record.payload.summary.switchbacks_total = runtime.switchbacks_total;
+	record.payload.summary.switchbacks_interval = runtime.switchbacks_interval;
+	record.payload.summary.flags = summary_flags();
+	record.payload.summary.dropped_messages = dropped_messages;
+	record.crc16 = crc16_ccitt((const uint8_t *)&record,
+				   offsetof(struct field_log_record, crc16));
 
-	battery_summary_build_record(&record, now_ms);
-	battery_summary_log(&record);
+	field_log_log_summary_record(&record);
+	field_log_append_current_record(&record, "summary");
+	field_log_runtime_reset_interval(now_ms);
+}
 
-	err = field_log_storage_append_record(&record);
-	if (err == 0) {
-		storage.next_sequence++;
-	} else if (err != -ENODEV && err != -ENOSPC) {
-		LOG_WRN("Field log summary was not persisted: %d", err);
+static int field_log_enqueue_message(const struct field_log_message *message)
+{
+	int err;
+
+	if (!field_log_started) {
+		return -EACCES;
 	}
 
-	k_mutex_unlock(&field_log_storage_mutex);
+	err = k_msgq_put(&field_log_msgq, message, K_NO_WAIT);
+	if (err) {
+		atomic_inc(&field_log_dropped_messages);
+	}
 
-	battery_accumulator_reset_interval(now_ms);
+	return err;
 }
 
 static void field_log_thread(void *arg1, void *arg2, void *arg3)
 {
-	int64_t next_summary_ms = k_uptime_get() +
-				  (CONFIG_APP_FIELD_LOG_SUMMARY_INTERVAL_SEC * 1000LL);
+	int64_t next_summary_ms;
 
 	ARG_UNUSED(arg1);
 	ARG_UNUSED(arg2);
 	ARG_UNUSED(arg3);
 
-	battery_accumulator_reset_interval(k_uptime_get());
+	memset(&runtime, 0, sizeof(runtime));
+	field_log_runtime_reset_interval(k_uptime_get());
+	next_summary_ms = runtime.summary_start_ms +
+			  (CONFIG_APP_FIELD_LOG_SUMMARY_INTERVAL_SEC * 1000LL);
 
 	while (true) {
-		const struct zbus_channel *chan;
-		union field_log_msg msg = {0};
+		struct field_log_message message;
 		int64_t now_ms = k_uptime_get();
-		int64_t wait_ms = next_summary_ms - now_ms;
+		int64_t wait_ms = MAX(0LL, next_summary_ms - now_ms);
 		int err;
 
-		if (wait_ms <= 0) {
-			battery_summary_finalize_interval();
+		if (now_ms >= next_summary_ms) {
+			field_log_finalize_summary();
 			next_summary_ms += CONFIG_APP_FIELD_LOG_SUMMARY_INTERVAL_SEC * 1000LL;
 			continue;
 		}
 
-		err = zbus_sub_wait_msg(&field_log_batt_sub, &chan, &msg, K_MSEC(wait_ms));
-		if (err == -EAGAIN || err == -ENOMSG) {
-			battery_summary_finalize_interval();
+		err = k_msgq_get(&field_log_msgq, &message, K_MSEC(wait_ms));
+		if (err == -EAGAIN) {
+			field_log_finalize_summary();
 			next_summary_ms += CONFIG_APP_FIELD_LOG_SUMMARY_INTERVAL_SEC * 1000LL;
 			continue;
 		}
 
 		if (err) {
-			LOG_WRN("Field log zbus wait failed: %d", err);
+			LOG_WRN("Field log queue wait failed: %d", err);
 			continue;
 		}
 
-		if (chan == &battery_sample_chan) {
-			battery_accumulator_add_sample(&msg.battery);
+		switch (message.type) {
+		case FIELD_LOG_MSG_BATTERY_SAMPLE:
+			field_log_process_battery_sample(&message.data.battery.sample);
+			break;
+		case FIELD_LOG_MSG_LOCATION_UPDATE:
+			field_log_process_location_update(&message.data.location);
+			break;
+		case FIELD_LOG_MSG_STATE_CHANGE:
+			field_log_process_state_change(&message.data.state);
+			break;
+		default:
+			LOG_WRN("Field log ignored unknown queue message: %d", message.type);
+			break;
 		}
 	}
 }
@@ -627,65 +1044,137 @@ int field_log_start(void)
 		LOG_WRN("Field log will still print summaries, but flash persistence is disabled");
 	}
 
+	field_log_started = true;
+	(void)atomic_set(&field_log_dropped_messages, 0);
+
 	k_thread_create(&field_log_thread_data, field_log_stack,
 			K_THREAD_STACK_SIZEOF(field_log_stack),
 			field_log_thread, NULL, NULL, NULL,
 			FIELD_LOG_PRIORITY, 0, K_NO_WAIT);
 	k_thread_name_set(&field_log_thread_data, "field_log");
 
-	field_log_started = true;
-
-	LOG_INF("Field log prototype started: battery summary interval=%d s",
+	LOG_INF("Field log started: summary interval=%d s",
 		CONFIG_APP_FIELD_LOG_SUMMARY_INTERVAL_SEC);
 
 	return 0;
 }
 
-#if defined(CONFIG_APP_FIELD_LOG_SHELL)
-static int field_log_count_records(uint32_t *valid_records, off_t *stop_offset,
-				   bool *stopped_on_invalid)
+void field_log_note_battery_sample(const struct app_battery_sample *sample)
 {
-	struct field_log_battery_summary_record record;
-	enum field_log_slot_state slot_state;
-	uint32_t count = 0;
+	struct field_log_message message = {
+		.type = FIELD_LOG_MSG_BATTERY_SAMPLE,
+	};
 
-	*stopped_on_invalid = false;
-	*stop_offset = 0;
+	if (sample == NULL) {
+		return;
+	}
+
+	message.data.battery.sample = *sample;
+	(void)field_log_enqueue_message(&message);
+}
+
+void field_log_note_location(enum field_log_location_source source,
+			     double latitude,
+			     double longitude,
+			     float accuracy_m)
+{
+	struct field_log_message message = {
+		.type = FIELD_LOG_MSG_LOCATION_UPDATE,
+	};
+
+	if (source <= FIELD_LOG_LOCATION_NONE || source > FIELD_LOG_LOCATION_AGNSS) {
+		return;
+	}
+
+	if (latitude < -90.0 || latitude > 90.0 ||
+	    longitude < -180.0 || longitude > 180.0) {
+		return;
+	}
+
+	message.data.location.source = source;
+	message.data.location.timestamp_ms = k_uptime_get();
+	message.data.location.latitude_e6 = degrees_to_e6(latitude);
+	message.data.location.longitude_e6 = degrees_to_e6(longitude);
+	message.data.location.accuracy_m = accuracy_to_u16(accuracy_m);
+
+	(void)field_log_enqueue_message(&message);
+}
+
+void field_log_note_state_change(enum app_state from_state,
+				 enum app_state to_state,
+				 enum app_evt_type reason,
+				 const struct app_ctx *ctx)
+{
+	struct field_log_message message = {
+		.type = FIELD_LOG_MSG_STATE_CHANGE,
+	};
+
+	if (ctx == NULL || from_state == to_state) {
+		return;
+	}
+
+	message.data.state.from_state = from_state;
+	message.data.state.to_state = to_state;
+	message.data.state.reason_evt = reason;
+	message.data.state.active_rat = ctx->active_rat;
+	message.data.state.next_rat = ctx->next_rat;
+	message.data.state.last_rsrp_dbm = clamp_s16(ctx->rsrp_dbm);
+	message.data.state.timestamp_ms = k_uptime_get();
+
+	(void)field_log_enqueue_message(&message);
+}
+
+#if defined(CONFIG_APP_FIELD_LOG_SHELL)
+struct field_log_record_counts {
+	uint32_t total;
+	uint32_t state_changes;
+	uint32_t summaries;
+	off_t stop_offset;
+	bool stopped_on_invalid;
+};
+
+static int field_log_count_records(struct field_log_record_counts *counts)
+{
+	struct field_log_record record;
+	enum field_log_slot_state slot_state;
+
+	memset(counts, 0, sizeof(*counts));
 
 	for (off_t offset = 0; offset + sizeof(record) <= storage.capacity_bytes;
 	     offset += sizeof(record)) {
 		int err = field_log_storage_read_slot(offset, &record, &slot_state);
+
 		if (err) {
 			return err;
 		}
 
 		if (slot_state == FIELD_LOG_SLOT_EMPTY) {
-			*stop_offset = offset;
-			*valid_records = count;
+			counts->stop_offset = offset;
 			return 0;
 		}
 
 		if (slot_state == FIELD_LOG_SLOT_INVALID) {
-			*stopped_on_invalid = true;
-			*stop_offset = offset;
-			*valid_records = count;
+			counts->stopped_on_invalid = true;
+			counts->stop_offset = offset;
 			return 0;
 		}
 
-		count++;
-		*stop_offset = offset + sizeof(record);
+		counts->total++;
+		if (record.header.type == FIELD_LOG_RECORD_TYPE_STATE_CHANGE) {
+			counts->state_changes++;
+		} else if (record.header.type == FIELD_LOG_RECORD_TYPE_SUMMARY) {
+			counts->summaries++;
+		}
+		counts->stop_offset = offset + sizeof(record);
 	}
 
-	*valid_records = count;
 	return 0;
 }
 
 static int cmd_fieldlog_info(const struct shell *shell, size_t argc, char **argv)
 {
-	uint32_t valid_records = 0;
-	off_t stop_offset = 0;
-	bool stopped_on_invalid = false;
-	int err = 0;
+	struct field_log_record_counts counts;
+	int err;
 
 	ARG_UNUSED(argc);
 	ARG_UNUSED(argv);
@@ -698,7 +1187,7 @@ static int cmd_fieldlog_info(const struct shell *shell, size_t argc, char **argv
 		return -ENODEV;
 	}
 
-	err = field_log_count_records(&valid_records, &stop_offset, &stopped_on_invalid);
+	err = field_log_count_records(&counts);
 
 	shell_print(shell, "fieldlog storage:");
 #if defined(PM_EXTERNAL_FLASH_ID)
@@ -709,13 +1198,16 @@ static int cmd_fieldlog_info(const struct shell *shell, size_t argc, char **argv
 	shell_print(shell, "  area_offset: 0x%lx", (long)storage.area->fa_off);
 	shell_print(shell, "  capacity_bytes: %zu", storage.capacity_bytes);
 	shell_print(shell, "  record_size_bytes: %u", FIELD_LOG_RECORD_SIZE);
-	shell_print(shell, "  valid_records: %u", valid_records);
-	shell_print(shell, "  stop_offset: 0x%lx", (long)stop_offset);
+	shell_print(shell, "  total_records: %u", counts.total);
+	shell_print(shell, "  state_changes: %u", counts.state_changes);
+	shell_print(shell, "  summaries: %u", counts.summaries);
+	shell_print(shell, "  stop_offset: 0x%lx", (long)counts.stop_offset);
 	shell_print(shell, "  write_offset: 0x%lx", (long)storage.write_offset);
 	shell_print(shell, "  next_sequence: %u", storage.next_sequence);
 	shell_print(shell, "  storage_ready: %u", storage.ready ? 1U : 0U);
 	shell_print(shell, "  storage_full: %u", storage.full ? 1U : 0U);
-	shell_print(shell, "  stopped_on_invalid: %u", stopped_on_invalid ? 1U : 0U);
+	shell_print(shell, "  stopped_on_invalid: %u",
+		    counts.stopped_on_invalid ? 1U : 0U);
 
 	k_mutex_unlock(&field_log_storage_mutex);
 
@@ -726,32 +1218,66 @@ static int cmd_fieldlog_info(const struct shell *shell, size_t argc, char **argv
 	return err;
 }
 
-static void shell_print_battery_record(const struct shell *shell,
-				       const struct field_log_battery_summary_record *record)
+static void shell_print_state_record(const struct shell *shell,
+				     const struct field_log_record *record)
 {
+	char latitude[20] = "";
+	char longitude[20] = "";
+	const struct field_log_state_record_payload *payload = &record->payload.state;
+	const char *accuracy_text = "";
+
+	if (payload->location_source != FIELD_LOG_LOCATION_NONE) {
+		field_log_format_coordinate(latitude, sizeof(latitude), payload->latitude_e6);
+		field_log_format_coordinate(longitude, sizeof(longitude), payload->longitude_e6);
+	}
+
+	if (payload->accuracy_m != FIELD_LOG_LOCATION_ACCURACY_UNKNOWN) {
+		static char accuracy_buffer[8];
+
+		snprintk(accuracy_buffer, sizeof(accuracy_buffer), "%u",
+			 payload->accuracy_m);
+		accuracy_text = accuracy_buffer;
+	}
+
 	shell_print(shell,
-		    "%u,%u,%u,%u,%d,%d,%d,%u,%u,%u,%d,%d,%u,%u,%u,0x%02x",
-		    record->sequence,
-		    record->uptime_s,
-		    record->interval_s,
-		    record->sample_count,
-		    record->avg_current_ma,
-		    record->min_current_ma,
-		    record->max_current_ma,
-		    record->avg_voltage_mv,
-		    record->min_voltage_mv,
-		    record->last_voltage_mv,
-		    record->avg_temp_deci_c,
-		    record->net_energy_interval_uwh,
-		    record->discharge_energy_interval_uwh,
-		    record->discharge_energy_total_uwh,
-		    record->vbus_sample_count,
-		    record->flags);
+		    "state,%u,%u,%s,%s,%s,%s,%s,%s,%s,%s,%s,%d,,,,,,,,",
+		    record->header.sequence,
+		    record->header.uptime_s,
+		    field_log_state_name(payload->from_state),
+		    field_log_state_name(payload->to_state),
+		    app_evt_name(payload->reason_evt),
+		    field_log_rat_name(payload->active_rat),
+		    field_log_rat_name(payload->next_rat),
+		    field_log_location_source_name(payload->location_source),
+		    latitude,
+		    longitude,
+		    accuracy_text,
+		    payload->last_rsrp_dbm);
+}
+
+static void shell_print_summary_record(const struct shell *shell,
+				       const struct field_log_record *record)
+{
+	const struct field_log_summary_record_payload *payload = &record->payload.summary;
+
+	shell_print(shell,
+		    "summary,%u,%u,,,,,,,,,,,%u,%u,%u,%u,%u,%u,%u,0x%02x,%u",
+		    record->header.sequence,
+		    record->header.uptime_s,
+		    payload->interval_s,
+		    payload->power_interval_uwh,
+		    payload->power_total_uwh,
+		    payload->lte_losses_interval,
+		    payload->lte_losses_total,
+		    payload->switchbacks_interval,
+		    payload->switchbacks_total,
+		    payload->flags,
+		    payload->dropped_messages);
 }
 
 static int cmd_fieldlog_dump(const struct shell *shell, size_t argc, char **argv)
 {
-	struct field_log_battery_summary_record record;
+	struct field_log_record record;
 	enum field_log_slot_state slot_state;
 	uint32_t count = 0;
 	int err = 0;
@@ -767,7 +1293,7 @@ static int cmd_fieldlog_dump(const struct shell *shell, size_t argc, char **argv
 		return -ENODEV;
 	}
 
-	shell_print(shell, "# fieldlog battery summary csv v1");
+	shell_print(shell, "# fieldlog csv v2");
 	shell_print(shell, FIELD_LOG_CSV_HEADER);
 
 	for (off_t offset = 0; offset + sizeof(record) <= storage.capacity_bytes;
@@ -788,7 +1314,12 @@ static int cmd_fieldlog_dump(const struct shell *shell, size_t argc, char **argv
 			break;
 		}
 
-		shell_print_battery_record(shell, &record);
+		if (record.header.type == FIELD_LOG_RECORD_TYPE_STATE_CHANGE) {
+			shell_print_state_record(shell, &record);
+		} else {
+			shell_print_summary_record(shell, &record);
+		}
+
 		count++;
 	}
 
@@ -833,7 +1364,7 @@ static int cmd_fieldlog_erase(const struct shell *shell, size_t argc, char **arg
 
 SHELL_STATIC_SUBCMD_SET_CREATE(fieldlog_cmds,
 	SHELL_CMD(info, NULL, "Show field log storage status", cmd_fieldlog_info),
-	SHELL_CMD(dump, NULL, "Dump battery summaries as CSV", cmd_fieldlog_dump),
+	SHELL_CMD(dump, NULL, "Dump field log as CSV", cmd_fieldlog_dump),
 	SHELL_CMD(erase, NULL, "Erase field log storage", cmd_fieldlog_erase),
 	SHELL_SUBCMD_SET_END
 );

@@ -6,4 +6,24 @@
 
 #pragma once
 
+#include "app_types.h"
+#include "app_zbus.h"
+
+enum field_log_location_source {
+	FIELD_LOG_LOCATION_NONE = 0,
+	FIELD_LOG_LOCATION_LTE,
+	FIELD_LOG_LOCATION_GNSS,
+	FIELD_LOG_LOCATION_AGNSS,
+};
+
 int field_log_start(void);
+
+void field_log_note_battery_sample(const struct app_battery_sample *sample);
+void field_log_note_location(enum field_log_location_source source,
+			     double latitude,
+			     double longitude,
+			     float accuracy_m);
+void field_log_note_state_change(enum app_state from_state,
+				 enum app_state to_state,
+				 enum app_evt_type reason,
+				 const struct app_ctx *ctx);
