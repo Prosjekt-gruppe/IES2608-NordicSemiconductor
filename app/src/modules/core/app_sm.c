@@ -309,6 +309,22 @@ static void ltem_connected_entry(void *obj)
         LOG_WRN("Could not read LTE RSRP: %d", err);
     }
 
+#if defined(CONFIG_APP_DEBUG_CORE_UDP_BURST_TEST)
+    struct udp_test_cfg test_cfg = {
+        .payload_len = 32,
+        .interval_ms = 500,
+        .count = 5,
+    };
+
+    LOG_INF("Starting UDP burst test");
+    err = modem_service_udp_send_burst(&test_cfg);
+    if (err) {
+        LOG_ERR("UDP burst test failed: %d", err);
+    } else {
+        LOG_INF("UDP burst test OK");
+    }
+#endif
+
     err = rsrp_service_start_monitor();
     if (err < 0) {
         LOG_WRN("Failed to start LTE signal monitor: %d", err);
@@ -452,7 +468,7 @@ static enum smf_state_result cloud_connecting_run(void *obj)
 static void cloud_connecting_exit(void *obj)
 {
     ARG_UNUSED(obj);
-    LOG_INF("cloud connecting exit"); 
+    LOG_INF("cloud connecting exit");
 }
 
 

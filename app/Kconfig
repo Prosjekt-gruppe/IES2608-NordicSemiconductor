@@ -223,5 +223,13 @@ config APP_DEBUG_NTN
   help 
     Verbose info from modem
 
+config APP_DEBUG_CORE_UDP_BURST_TEST
+  bool "Test burst UDP send function"
+  depends on APP_DEBUG
+  default n
+  help
+    Debug UDP burst send
+
+    
 endmenu
 
