@@ -73,12 +73,11 @@ static void handle_gnss_status(struct app_ctx *ctx, const struct app_gnss_status
 
 static void dispatch_app_event(struct app_ctx *ctx, const struct app_event *ev);
 static void backoff_timer_handler(struct k_timer *timer);
-static void ntn_timer_handler(struct k_timer *timer);
-static void ltem_timer_handler(struct k_timer *timer);
-
 
 static void ntn_timer_handler(struct k_timer *timer);
 static void ltem_timer_handler(struct k_timer *timer);
+static void handoff_timer_handler(struct k_timer *timer); 
+
 
 
 static const struct smf_state states[] = {
@@ -202,19 +201,25 @@ static void boot_entry(void *obj)
         return; 
     }
 
-    /*
+    
     err = gnss_service_init();
     if (err) {
         LOG_ERR("gnss_service_init err=%d", err);
         return;
     }
-    */
+
 
     /* init timers */
     k_timer_init(&ctx->backoff_timer, backoff_timer_handler, NULL);
     k_timer_init(&ctx->ntn_timer, ntn_timer_handler, NULL);
     k_timer_init(&ctx->lte_timer, ltem_timer_handler, NULL);
+    k_timer_init(&ctx->handoff_timer, handoff_timer_handler, NULL);
     
+
+    /* gnss timerout */
+    ctx->gnss_goal = GNSS_GOAL_NONE; 
+    ctx->gnss_timeout_sec = 0; 
+    ctx->gnss_extend_once = false; 
     
     LOG_INF("BOOT complete");
 }
@@ -238,6 +243,8 @@ static void ltem_connecting_entry(void *obj)
 {
     ARG_UNUSED(obj);
 
+    LOG_WRN("ENTER: STATE_LTEM_CONNECTING");
+
     int err = lte_service_connect_async();
     if (err){
         LOG_ERR("lte_service_connect_async err=%d", err); 
@@ -254,22 +261,19 @@ static enum smf_state_result ltem_connecting_run(void *obj)
     struct app_ctx *ctx = obj;
 
     switch (ctx->ev.type) {
-
-        case EVT_REG_OK:
+        case EVT_REG_OK: {
             ctx->active_rat = RAT_LTEM;
+            ctx->lte_connected = true; 
+            ctx->last_done = STEP_NONE;
 
-            if (IS_ENABLED(CONFIG_APP_DEBUG_LTE_CONNECTING)){
-                LOG_INF("Debug_ Halting after LTE registration");
-                smf_set_state(SMF_CTX(ctx), &states[STATE_IDLE]);
-            } else {
-                smf_set_state(SMF_CTX(ctx), &states[STATE_LTEM_CONNECTED]);
-            }
-
+            LOG_WRN("TRANSITION: STATE_LTEM_CONNECTING -> STATE_LTEM_CONNECTED");
+            smf_set_state(SMF_CTX(ctx), &states[STATE_LTEM_CONNECTED]); 
             return SMF_EVENT_HANDLED;
+        }
 
         case EVT_REG_FAIL:
             ctx->next_rat = RAT_NTN;
-            /* go to backoff state */
+            LOG_WRN("TRANSITION: STATE_LTEM_CONNECTING -> STATE_BACKOFF");
             smf_set_state(SMF_CTX(ctx), &states[STATE_BACKOFF]);
             return SMF_EVENT_HANDLED;
 
@@ -296,6 +300,8 @@ static void ltem_connected_entry(void *obj)
     int err;
     int rsrp_dbm;
 
+    LOG_WRN("ENTER: STATE_LTEM_CONNECTED");
+
     ctx->active_rat = RAT_LTEM;
     ctx->lte_connected = true;
     
@@ -308,16 +314,12 @@ static void ltem_connected_entry(void *obj)
         LOG_WRN("Could not read LTE RSRP: %d", err);
     }
 
-    /*
-    err = rsrp_service_start();
-    
+    /*    
     err = rsrp_service_start_monitor();
     if (err < 0) {
     LOG_WRN("Failed to start LTE signal monitor: %d", err);
     }
-    */
 
-    /*
     err = rsrp_service_start();
     if (err < 0) {
     LOG_WRN("Failed to start LTE signal monitor: %d", err);
@@ -329,10 +331,53 @@ static void ltem_connected_entry(void *obj)
     k_timer_start(&ctx->lte_timer, K_MSEC(3000), K_NO_WAIT);
 #endif
 
-    LOG_INF("ltem_connected_entry ok");
-    LOG_INF("STATE_LTEM_CONNECTED --> STATE_CLOUD_CONNECTING");
-    smf_set_state(SMF_CTX(ctx), &states[STATE_CLOUD_CONNECTING]);
+    // debug
+    if (IS_ENABLED(CONFIG_APP_DEBUG_CLOUD_CONNECTING) && 
+        ctx->last_done == STEP_CLOUD_DONE){
+            LOG_INF("DEBUG: Halting after cloud conenct");
+            return; 
+        }
+    if (IS_ENABLED(CONFIG_APP_DEBUG_LTE_LOCATION) &&
+        ctx->last_done == STEP_LTE_LOC_DONE) {
+            LOG_INF("DEBUG: Halting after LTE location");
+            return;
+        }
+    if (IS_ENABLED(CONFIG_APP_DEBUG_GNSS_ACQUIRE) && ctx->last_done == STEP_GNSS_DONE){
+        LOG_INF("DEBUG: Halting after GNSS acquire");
+        return; 
+    }
 
+    LOG_INF("ltem_connected_entry ok");
+
+    // orchestration logic 
+    if (!ctx->cloud_connected){
+        struct app_event ev = {
+            .type = EVT_START_CLOUD
+        };
+
+        LOG_INF("LTEM_CONNECTED: requesting cloud connect");
+        (void)app_event_put(&ev, K_NO_WAIT);
+        return;
+    }
+
+    if(ctx->cloud_connected && ctx->last_done == STEP_CLOUD_DONE){
+        struct app_event ev = {
+            .type = EVT_START_LTE_LOC
+        };
+
+        LOG_INF("LTEM_CONNECTED: requesting LTE location");
+        (void)app_event_put(&ev, K_NO_WAIT);
+        return;
+    }
+
+    if(ctx->cloud_connected && ctx->last_done == STEP_LTE_LOC_DONE) {
+        struct app_event ev = {
+            .type = EVT_START_GNSS
+        };
+        LOG_INF("LTEM_CONNECTED: requesting GNSS acquire");
+        (void)app_event_put(&ev, K_NO_WAIT);
+        return; 
+    }
 }
 
 static enum smf_state_result ltem_connected_run(void *obj)
@@ -343,16 +388,30 @@ static enum smf_state_result ltem_connected_run(void *obj)
     case EVT_RSRP_UPDATE:
         ctx->rsrp_dbm = ctx->ev.meas.rsrp_dbm;
         LOG_INF("Updated LTE RSRP: %d dBm", ctx->rsrp_dbm);
-        
         return SMF_EVENT_HANDLED;
 
     case EVT_LTE_POOR:
         LOG_WRN("LTE poor, consider switching RAT");
         ctx->next_rat = RAT_NTN;
-        /* go to backoff */
+        LOG_WRN("TRANSITION: STATE_LTEM_CONNECTED -> STATE_BACKOFF"); 
         smf_set_state(SMF_CTX(ctx), &states[STATE_BACKOFF]);
         return SMF_EVENT_HANDLED;
+
+    case EVT_START_CLOUD: 
+        LOG_INF("LTEM_CONNECTED: starting cloud connect");
+        smf_set_state(SMF_CTX(ctx), &states[STATE_CLOUD_CONNECTING]);
+        return SMF_EVENT_HANDLED;
     
+    case EVT_START_LTE_LOC:
+        LOG_INF("LTEM_CONNECTED: starting LTE location");
+        smf_set_state(SMF_CTX(ctx), &states[STATE_LTE_LOCATION]);
+        return SMF_EVENT_HANDLED;
+
+    case EVT_START_GNSS:
+        LOG_INF("LTEM_CONNECTED: starting GNSS acquire");
+        smf_set_state(SMF_CTX(ctx), &states[STATE_GNSS_ACQUIRE]);
+        return SMF_EVENT_HANDLED; 
+
 #if defined(CONFIG_APP_CORE_SM_PROBE_TEST)
     case EVT_TIMEOUT:
         LOG_INF("going to state ntn connected state");
@@ -369,14 +428,8 @@ static void ltem_connected_exit(void *obj)
 {
     ARG_UNUSED(obj);
 
-    /*
-    struct app_ctx *ctx = obj;
-    int err = rsrp_service_stop();
-    if (err) {
-        LOG_WRN("Failed to stop LTE signal monitor: %d", err);
-    }
-    ctx->lte_connected = false;
-    */
+    LOG_WRN("EXIT: STATE_LTEM_CONNECTED");
+
 }
 
 
@@ -385,6 +438,8 @@ static void cloud_connecting_entry(void *obj)
 {
     struct app_ctx *ctx = obj;
     int err; 
+
+    LOG_WRN("ENTER: STATE_CLOUD");
 
     ctx->cloud_connected = false; 
 
@@ -404,38 +459,25 @@ static enum smf_state_result cloud_connecting_run(void *obj)
 
     switch(ctx->ev.type){
         case EVT_CLOUD_OK:
-            ctx->cloud_connected = true; 
             LOG_INF("Cloud connected"); 
-
-            if (IS_ENABLED(CONFIG_APP_DEBUG_CLOUD_CONNECTING)){
-                LOG_INF("DEBUG: Halting after cloud connect success"); 
-                smf_set_state(SMF_CTX(ctx), &states[STATE_IDLE]);
-            } else {
-                smf_set_state(SMF_CTX(ctx), &states[STATE_LTE_LOCATION]);
-            }
+            ctx->cloud_connected = true; 
+            ctx->last_done = STEP_CLOUD_DONE; 
+            LOG_WRN("TRANSITION: STATE_CLOUD -> STATE_LTEM_CONNECTED");
+            smf_set_state(SMF_CTX(ctx), &states[STATE_LTEM_CONNECTED]); 
             return SMF_EVENT_HANDLED;
 
         case EVT_CLOUD_FAIL: 
-            ctx->cloud_connected = false; 
             LOG_WRN("Cloud connection failed");
-
-            if (IS_ENABLED(CONFIG_APP_DEBUG_CLOUD_CONNECTING)){
-                LOG_INF("DEBUG: Halting after cloud connect failure");
-                smf_set_state(SMF_CTX(ctx), &states[STATE_IDLE]);
-            } else {
-                smf_set_state(SMF_CTX(ctx), &states[STATE_IDLE]);
-            }
+            ctx->cloud_connected = false;  
+            LOG_WRN("TRANSITION: STATE_CLOUD -> STATE_BACKOFF");
+            smf_set_state(SMF_CTX(ctx), &states[STATE_BACKOFF]);
             return SMF_EVENT_HANDLED;
 
         case EVT_CLOUD_DISCONNECTED:
-            ctx->cloud_connected = false; 
-            LOG_WRN("Cloud disconnected while connecting");
-            if(IS_ENABLED(CONFIG_APP_DEBUG_CLOUD_CONNECTING)){
-                LOG_INF("DEBUG: Halting after cloud disconnect");
-                smf_set_state(SMF_CTX(ctx), &states[STATE_IDLE]);
-            } else {
-                smf_set_state(SMF_CTX(ctx), &states[STATE_IDLE]);
-            }
+            LOG_WRN("Cloud disconnected");
+            ctx->cloud_connected = false;  
+            LOG_WRN("TRANSITION: STATE_CLOUD -> STATE_LTEM_CONNECTED");
+            smf_set_state(SMF_CTX(ctx), &states[STATE_LTEM_CONNECTED]);
             return SMF_EVENT_HANDLED;
         
         default:
@@ -446,16 +488,21 @@ static enum smf_state_result cloud_connecting_run(void *obj)
 static void cloud_connecting_exit(void *obj)
 {
     ARG_UNUSED(obj);
-    LOG_INF("cloud connecting exit"); 
+    LOG_INF("EXIT: STATE_CLOUD_CONNECTING"); 
 }
-
 
 
 static void lte_location_entry(void *obj)
 {
     ARG_UNUSED(obj);
 
-    int err = location_service_start_lte_location();
+    int err; 
+
+    LOG_INF("ENTER: STATE_LTE_LOCATION");
+    
+    err = location_service_start_lte_location();
+    LOG_INF("location_service_start_lte_location() -> %d", err);
+    
     if (err){
         LOG_ERR("location_service_start_lte_location err=%d", err);
         (void)app_event_publish_type(EVT_LTE_LOC_FAIL);
@@ -472,40 +519,34 @@ static enum smf_state_result lte_location_run(void *obj)
         case EVT_LTE_LOC_OK:
             ctx->last_pvt = ctx->ev.pvt;
             ctx->have_fix = true; 
+            ctx->last_done = STEP_LTE_LOC_DONE;
+
+            ctx->gnss_goal = GNSS_GOAL_REFINE_LTE_FIX;
+            ctx->gnss_timeout_sec = 30; 
+            ctx->gnss_extend_once = false; 
 
             LOG_INF("LTE location fix stored: lat=%f lon=%f",
                 (double)ctx->last_pvt.latitude,
                 (double)ctx->last_pvt.longitude);
-            
-            if (IS_ENABLED(CONFIG_APP_DEBUG_LTE_LOCATION)){
-                LOG_INF("DEBUG: Halting after LTE location success"); 
-                smf_set_state(SMF_CTX(ctx), &states[STATE_IDLE]);
+            LOG_WRN("Returning to LTEM_CONNECTED");
 
-            }else {
-                smf_set_state(SMF_CTX(ctx), &states[STATE_IDLE]);
-            }
+            LOG_WRN("TRANSITION: STATE_LTE_LOCATION -> STATE_LTEM_CONNECTED");
+            smf_set_state(SMF_CTX(ctx), &states[STATE_LTEM_CONNECTED]);
             return SMF_EVENT_HANDLED;
 
         case EVT_LTE_LOC_FAIL:
             LOG_WRN("LTE location failed");
-
-            if (IS_ENABLED(CONFIG_APP_DEBUG_LTE_LOCATION)){
-                LOG_INF("DEBUG: HALTING after LTE location failure");
-                smf_set_state(SMF_CTX(ctx), &states[STATE_IDLE]);
-            }else {
-                smf_set_state(SMF_CTX(ctx), &states[STATE_IDLE]);
-            }
+            ctx->last_done=STEP_LTE_LOC_DONE;
+            LOG_WRN("TRANSITION: STATE_LTE_LOCATION -> STATE_LTEM_CONNECTED");
+            smf_set_state(SMF_CTX(ctx), &states[STATE_LTEM_CONNECTED]);
             return SMF_EVENT_HANDLED;
 
         case EVT_LTE_LOC_TIMEOUT:
             LOG_WRN("LTE location timeout");
+            ctx->last_done=STEP_LTE_LOC_DONE;
 
-            if(IS_ENABLED(CONFIG_APP_DEBUG_LTE_LOCATION)){
-                LOG_INF("DEBUG: Halting after LTE location timeout");
-                smf_set_state(SMF_CTX(ctx), &states[STATE_IDLE]);
-            } else {
-                smf_set_state(SMF_CTX(ctx), &states[STATE_IDLE]);
-            }
+            LOG_WRN("TRANSITION: STATE_LTE_LOCATION -> STATE_LTEM_CONNECTED"); 
+            smf_set_state(SMF_CTX(ctx), &states[STATE_LTEM_CONNECTED]);
             return SMF_EVENT_HANDLED;
 
         default:
@@ -517,12 +558,13 @@ static void lte_location_exit(void *obj)
 {
     ARG_UNUSED(obj);
 
+    /*
     int err = location_service_stop();
     if (err) {
         LOG_WRN("location_service_stop failed: %d", err);
     }
-
-    LOG_INF("lte location exit");
+    */
+    LOG_INF("EXIT: STATE_LTE_LOCATION");
 }
 
 #if defined(CONFIG_APP_CORE_SM_PROBE_TEST)
@@ -532,50 +574,78 @@ static void lte_location_exit(void *obj)
 
 
 
-//#if 0
+
 static void gnss_acquire_entry(void *obj)
 {
-    ARG_UNUSED(obj);
+    struct app_ctx *ctx = obj;
+    int err;
+    int32_t timeout_sec = ctx->gnss_timeout_sec;
 
-    (void)gnss_service_start_timeout(CONFIG_APP_GNSS_TIMEOUT_SEC);
-    (void)gnss_service_start();
+    LOG_WRN("ENTER: STATE_GNSS_ACQUIRE");
 
-    LOG_INF("(%s) GNSS_ACQUIRE entry done", __func__);
+    if (timeout_sec <= 0) {
+        timeout_sec = 15;
+    }
+
+    LOG_INF("GNSS goal=%d timeout=%d sec",
+            ctx->gnss_goal, timeout_sec);
+
+    err = gnss_service_start_assisted(timeout_sec);
+    LOG_INF("gnss_service_start_assisted() -> %d", err);
+
+    if (err) {
+        LOG_ERR("gnss_service_start_assisted failed: %d", err);
+
+        struct app_event ev = {
+            .type = EVT_GNSS_TIMEOUT
+        };
+
+        (void)app_event_put(&ev, K_NO_WAIT);
+        return;
+    }
+
+    LOG_INF("GNSS acquire started (A-GNSS handled internally)");
 }
 
 static enum smf_state_result gnss_acquire_run(void *obj)
 {
     struct app_ctx *ctx = obj;
 
-    LOG_INF("entering (%s)", __func__);
-
     switch (ctx->ev.type) {
     case EVT_GNSS_FIX:
         ctx->last_pvt = ctx->ev.pvt;
         ctx->have_fix = true;
+        ctx->last_done = STEP_GNSS_DONE;
+        ctx->gnss_goal = GNSS_GOAL_NONE;
+        ctx->gnss_timeout_sec = 0;
+        ctx->gnss_extend_once = false;
 
         LOG_INF("GNSS FIX OK: lat=%f, lon=%f",
                 (double)ctx->last_pvt.latitude,
                 (double)ctx->last_pvt.longitude);
+        LOG_WRN("TRANSITION: STATE_GNSS_ACQUIRE -> STATE_LTEM_CONNECTED");
 
-        (void)gnss_service_stop();
-        smf_set_state(SMF_CTX(ctx), &states[STATE_NTN_CONNECTING]);
+        smf_set_state(SMF_CTX(ctx), &states[STATE_LTEM_CONNECTED]);
         return SMF_EVENT_HANDLED;
 
     case EVT_GNSS_TIMEOUT:
         LOG_INF("GNSS_ACQUIRE: gnss timeout");
-        (void)gnss_service_stop();
 
-        /* ONLY FOR TESTING NTN */
-        ctx->last_pvt.latitude = 63.4305;
-        ctx->last_pvt.longitude = 10.3951;
-        ctx->last_pvt.altitude = 10;
+        if (ctx->gnss_goal == GNSS_GOAL_REQUIRED_FOR_NTN &&
+            ctx->gnss_extend_once) {
+            ctx->gnss_extend_once = false;
 
-        ctx->have_fix = true;
+            LOG_WRN("GNSS required for NTN: extending search once by 30 sec");
+            (void)gnss_service_start_timeout(30);
+            return SMF_EVENT_HANDLED;
+        }
 
-        LOG_INF("Using fallback GNSS position (Trondheim)");
+        ctx->last_done = STEP_GNSS_DONE;
 
-        smf_set_state(SMF_CTX(ctx), &states[STATE_NTN_CONNECTING]);
+        LOG_WRN("No GNSS fix obtained");
+        LOG_WRN("TRANSITION: STATE_GNSS_ACQUIRE -> STATE_LTEM_CONNECTED");
+
+        smf_set_state(SMF_CTX(ctx), &states[STATE_LTEM_CONNECTED]);
         return SMF_EVENT_HANDLED;
 
     default:
@@ -589,7 +659,9 @@ static void gnss_acquire_exit(void *obj)
     ARG_UNUSED(obj);
 
     (void)gnss_service_cancel_timeout();
-    LOG_INF("gnss acquire exit");
+    (void)gnss_service_stop();
+
+    LOG_WRN("EXIT: STATE_GNSS_ACQUIRE");
 }
 
 static void ntn_connecting_entry(void *obj)
@@ -832,6 +904,11 @@ static enum smf_state_result backoff_run(void *obj)
 
         if (!ctx->have_fix) {
             LOG_INF("No GNSS fix -> trying to acquire fix");
+
+            ctx->gnss_goal = GNSS_GOAL_REQUIRED_FOR_NTN;
+            ctx->gnss_timeout_sec = 60; 
+            ctx->gnss_extend_once = true;
+
             smf_set_state(SMF_CTX(ctx), &states[STATE_GNSS_ACQUIRE]);
             return SMF_EVENT_HANDLED;
         }
@@ -848,8 +925,20 @@ static void backoff_exit(void *obj)
 {
     struct app_ctx *ctx = obj;
 
-    LOG_INF("Entering backoff");
+    LOG_INF("Exiting backoff");
     k_timer_stop(&ctx->backoff_timer);
+}
+
+
+static void handoff_timer_handler(struct k_timer *timer)
+{
+    ARG_UNUSED(timer);
+
+    struct app_event ev = {
+        .type = EVT_START_GNSS
+    };
+
+    (void)app_event_put(&ev, K_NO_WAIT);
 }
 
 /* main smf thread setup */

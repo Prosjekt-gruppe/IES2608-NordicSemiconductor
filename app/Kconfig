@@ -123,5 +123,13 @@ config APP_DEBUG_LTE_LOCATION
   help 
     Stop after LTE cellular location returns sucess, failure or timeout, 
     instead of continuing to later stages
+
+  config APP_DEBUG_GNSS_ACQUIRE
+  bool "Halt after GNSS result"
+  depends on APP_DEBUG
+  default n
+  help 
+    Stop after GNSS returns success or timeout
+    instead of continuing to later stages
 endmenu
 

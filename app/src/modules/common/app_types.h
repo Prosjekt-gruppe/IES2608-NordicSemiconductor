@@ -35,6 +35,9 @@ enum app_evt_type {
     EVT_BOOT,
     EVT_REG_OK,
     EVT_REG_FAIL,
+    EVT_START_CLOUD,
+    EVT_START_LTE_LOC,
+    EVT_START_GNSS,
     EVT_GNSS_FIX,
     EVT_GNSS_TIMEOUT,
     EVT_NTN_REG_FAIL,
@@ -44,15 +47,30 @@ enum app_evt_type {
     EVT_LTE_POOR,
     EVT_LTE_GOOD,
     EVT_LTE_LOC_OK,
+    EVT_LTE_LOC_FAIL,
+    EVT_LTE_LOC_TIMEOUT,
     EVT_CLOUD_OK,
     EVT_CLOUD_FAIL,
     EVT_CLOUD_DISCONNECTED,
-    EVT_LTE_LOC_FAIL,
-    EVT_LTE_LOC_TIMEOUT,
     EVT_BACKOFF_TIMEOUT,
     EVT_PDN_UP,
     EVT_PDN_DOWN,
 };
+
+// Debug events
+enum app_step_done {
+    STEP_NONE = 0,
+    STEP_CLOUD_DONE,
+    STEP_LTE_LOC_DONE,
+    STEP_GNSS_DONE,
+};
+
+enum gnss_goal { 
+    GNSS_GOAL_NONE = 0,
+    GNSS_GOAL_REFINE_LTE_FIX,
+    GNSS_GOAL_REQUIRED_FOR_NTN,
+};
+
 
 struct app_event {
     enum app_evt_type type;
@@ -63,13 +81,13 @@ struct app_event {
     };
 };
 
+
 struct app_ctx {
     struct smf_ctx ctx;
     
     /* rat overview */
     enum rat active_rat;
     enum rat next_rat;
-    
     
     /* ltem signal strength*/
     int rsrp_dbm;
@@ -81,6 +99,9 @@ struct app_ctx {
     /* gnss */
     bool have_fix;
     struct nrf_modem_gnss_pvt_data_frame last_pvt;
+    enum gnss_goal gnss_goal; 
+    int32_t gnss_timeout_sec; 
+    bool gnss_extend_once; 
     
     /* ntn */
     bool ntn_initialized;
@@ -91,10 +112,18 @@ struct app_ctx {
     /* lte */
    	bool lte_connected;
 
+
+
+    /* ochestration */
+    enum app_step_done last_done; 
+
     /* timers */
     struct k_timer backoff_timer;
     struct k_timer ntn_timer;
     struct k_timer lte_timer;
+
+    struct k_timer handoff_timer;
+    enum app_evt_type delayed_event; 
 
     /* pdn */
     bool pdn_up;
