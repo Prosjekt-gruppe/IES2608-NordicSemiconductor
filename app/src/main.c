@@ -42,8 +42,6 @@ int main(void)
 {
     static struct app_ctx ctx;
 
-    app_sm_start(&ctx);
-
 #if defined(CONFIG_APP_FIELD_LOG)
     int err = field_log_start();
 
@@ -51,6 +49,8 @@ int main(void)
         LOG_WRN("field_log_start failed: %d", err);
     }
 #endif
+
+    app_sm_start(&ctx);
 
     struct app_event boot = { .type = EVT_BOOT };
 
