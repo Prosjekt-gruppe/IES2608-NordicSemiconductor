@@ -23,7 +23,7 @@
 //#include <zephyr/kernel.h>
 
 /* for udp test */
-#define SERVER_PORT 59569 // port 
+#define SERVER_PORT 41313 // port 
 #define SERVER_ADDR "46.226.106.127" // tcpbin.net
 
 static struct k_work switch_work;
@@ -42,11 +42,6 @@ enum modem_access_mode {
     MODEM_ACCESS_NTN,
 };
 
-struct udp_test_cfg {
-    size_t payload_len;
-    int interval_ms;
-    int count;
-};
 
 
 LOG_MODULE_REGISTER(modem_service, LOG_LEVEL_INF);
@@ -217,6 +212,10 @@ int modem_service_udp_send_test(void)
 
 int modem_service_udp_send_burst(const struct udp_test_cfg *cfg)
 {
+    if (cfg == NULL) {
+        return -EINVAL;
+    }
+
     const struct udp_test_cfg *c = cfg;
     
     int sock;
