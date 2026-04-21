@@ -8,6 +8,7 @@
 #include "app_zbus.h"
 #include "rsrp_service.h"
 
+#include <iso646.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -96,14 +97,14 @@ static bool accel_sample_is_gravity_like(const int32_t xyz_mg[3])
 {
 	uint32_t magnitude_mg = accel_raw_magnitude_mg(xyz_mg);
 
-	return (magnitude_mg >= ACCEL_GRAVITY_MIN_MG) &&
+	return (magnitude_mg >= ACCEL_GRAVITY_MIN_MG) and
 	       (magnitude_mg <= ACCEL_GRAVITY_MAX_MG);
 }
 
 static bool accel_velocity_is_zero(const int32_t velocity_mm_s[3])
 {
-	return (velocity_mm_s[0] == 0) &&
-	       (velocity_mm_s[1] == 0) &&
+	return (velocity_mm_s[0] == 0) and
+	       (velocity_mm_s[1] == 0) and
 	       (velocity_mm_s[2] == 0);
 }
 
@@ -213,10 +214,11 @@ static void accel_thread(void *arg1, void *arg2, void *arg3)
 	uint8_t baseline_sample_count = 0;
 	bool have_baseline = false;
 	bool have_previous_sample = false;
-	bool moving = false;
-	bool motion_hint_sent = false;
+	bool last_reported_moving = false;
+	bool motion_state_was_reported = false;
 	uint32_t quiet_time_ms = 0;
 	uint32_t last_sample_ts_ms = 0;
+	uint32_t last_movement_ts_ms = 0;
 	uint32_t last_motion_log_ts_ms = 0;
 	uint32_t last_zbus_publish_ts_ms = 0;
 
@@ -228,10 +230,12 @@ static void accel_thread(void *arg1, void *arg2, void *arg3)
 		uint32_t dt_ms;
 		uint32_t linear_accel_mg;
 		uint32_t speed_mm_s;
-		bool moving_now;
-		bool motion_state_changed;
+		bool is_moving_now;
+		bool motion_state_has_changed;
+		bool movement_detected_now;
+		bool movement_seen_recently;
 		uint32_t sample_delta_mg;
-		bool sample_quiet;
+		bool sample_is_quiet;
 
 		if (ret < 0) {
 			LOG_WRN("Accelerometer read failed: %d", ret);
@@ -239,10 +243,10 @@ static void accel_thread(void *arg1, void *arg2, void *arg3)
 			continue;
 		}
 
-		if (!have_baseline) {
+		if (not have_baseline) {
 			const int32_t zero_linear_xyz_mg[3] = { 0 };
 
-			if (!accel_sample_is_gravity_like(xyz_mg)) {
+			if (not accel_sample_is_gravity_like(xyz_mg)) {
 				baseline_sample_count = 0;
 				accel_zero_xyz(baseline_sum_xyz_mg);
 				LOG_WRN("Ignoring accelerometer startup sample with invalid gravity magnitude: %u mg",
@@ -274,7 +278,7 @@ static void accel_thread(void *arg1, void *arg2, void *arg3)
 			(void)app_zbus_publish_accel_sample(false, 0, 0, 0,
 							    xyz_mg, zero_linear_xyz_mg);
 			last_zbus_publish_ts_ms = now_ms;
-			motion_hint_sent = true;
+			motion_state_was_reported = true;
 			LOG_INF("Accelerometer baseline calibrated: xyz=(%d, %d, %d) mg, gravity=%u mg",
 				baseline_xyz_mg[0], baseline_xyz_mg[1], baseline_xyz_mg[2],
 				accel_raw_magnitude_mg(baseline_xyz_mg));
@@ -285,7 +289,7 @@ static void accel_thread(void *arg1, void *arg2, void *arg3)
 		dt_ms = now_ms - last_sample_ts_ms;
 		last_sample_ts_ms = now_ms;
 
-		if ((dt_ms == 0U) || (dt_ms > ACCEL_MAX_DT_MS)) {
+		if ((dt_ms == 0U) or (dt_ms > ACCEL_MAX_DT_MS)) {
 			dt_ms = ACCEL_POLL_INTERVAL_MS;
 		}
 
@@ -309,10 +313,10 @@ static void accel_thread(void *arg1, void *arg2, void *arg3)
 		}
 		accel_copy_xyz(previous_xyz_mg, xyz_mg);
 
-		sample_quiet = (sample_delta_mg <= ACCEL_QUIET_THRESHOLD_MG) &&
-			       accel_sample_is_gravity_like(xyz_mg);
+		sample_is_quiet = (sample_delta_mg <= ACCEL_QUIET_THRESHOLD_MG) and
+				  accel_sample_is_gravity_like(xyz_mg);
 
-		if (sample_quiet) {
+		if (sample_is_quiet) {
 			if (quiet_time_ms < ACCEL_ZERO_VELOCITY_MS) {
 				uint32_t remaining_ms = ACCEL_ZERO_VELOCITY_MS - quiet_time_ms;
 
@@ -325,8 +329,8 @@ static void accel_thread(void *arg1, void *arg2, void *arg3)
 			accel_integrate_velocity(velocity_mm_s, linear_xyz_mg, dt_ms);
 		}
 
-		if ((quiet_time_ms >= ACCEL_ZERO_VELOCITY_MS) &&
-		    !accel_velocity_is_zero(velocity_mm_s)) {
+		if ((quiet_time_ms >= ACCEL_ZERO_VELOCITY_MS) and
+		    not accel_velocity_is_zero(velocity_mm_s)) {
 			accel_zero_xyz(velocity_mm_s);
 			LOG_INF("Standstill recalibration: velocity reset after %u ms without acceleration",
 				quiet_time_ms);
@@ -335,16 +339,27 @@ static void accel_thread(void *arg1, void *arg2, void *arg3)
 		speed_mm_s = accel_vector_magnitude_mg(velocity_mm_s[0],
 							 velocity_mm_s[1],
 							 velocity_mm_s[2]);
-		moving_now = (!sample_quiet && (linear_accel_mg >= ACCEL_MOVEMENT_THRESHOLD_MG)) ||
-			     (speed_mm_s >= ACCEL_MOVING_SPEED_MM_S);
 
 		if (quiet_time_ms >= ACCEL_ZERO_VELOCITY_MS) {
-			moving_now = false;
 			speed_mm_s = 0;
 		}
 
-		if (!sample_quiet && (linear_accel_mg >= ACCEL_MOVEMENT_THRESHOLD_MG) &&
-		    ((last_motion_log_ts_ms == 0U) ||
+		movement_detected_now = ((not sample_is_quiet) and
+					 (linear_accel_mg >= ACCEL_MOVEMENT_THRESHOLD_MG)) or
+					(speed_mm_s >= ACCEL_MOVING_SPEED_MM_S);
+
+		if (movement_detected_now) {
+			last_movement_ts_ms = now_ms;
+		}
+
+		movement_seen_recently = (last_movement_ts_ms != 0U) and
+					 ((now_ms - last_movement_ts_ms) <=
+					  CONFIG_APP_SENSOR_ACCEL_MOVING_HOLD_MS);
+		is_moving_now = movement_detected_now or movement_seen_recently;
+
+		if ((not sample_is_quiet) and
+		    (linear_accel_mg >= ACCEL_MOVEMENT_THRESHOLD_MG) and
+		    ((last_motion_log_ts_ms == 0U) or
 		     ((now_ms - last_motion_log_ts_ms) >= ACCEL_MOVEMENT_LOG_INTERVAL_MS))) {
 			last_motion_log_ts_ms = now_ms;
 			LOG_INF("Movement detected: accel=%u mg, delta=%u mg, speed=%u mm/s, xyz=(%d, %d, %d) mg, linear=(%d, %d, %d) mg",
@@ -353,12 +368,13 @@ static void accel_thread(void *arg1, void *arg2, void *arg3)
 				linear_xyz_mg[0], linear_xyz_mg[1], linear_xyz_mg[2]);
 		}
 
-		motion_state_changed = (!motion_hint_sent || (moving_now != moving));
+		motion_state_has_changed =
+			(not motion_state_was_reported) or (is_moving_now != last_reported_moving);
 
-		if (motion_state_changed) {
-			rsrp_service_set_motion_hint(moving_now, speed_mm_s, linear_accel_mg);
+		if (motion_state_has_changed) {
+			rsrp_service_set_motion_hint(is_moving_now, speed_mm_s, linear_accel_mg);
 
-			if (moving_now) {
+			if (is_moving_now) {
 				LOG_INF("Motion state: moving (speed=%u mm/s, accel=%u mg)",
 					speed_mm_s, linear_accel_mg);
 			} else {
@@ -366,13 +382,13 @@ static void accel_thread(void *arg1, void *arg2, void *arg3)
 					speed_mm_s, quiet_time_ms);
 			}
 
-			moving = moving_now;
-			motion_hint_sent = true;
+			last_reported_moving = is_moving_now;
+			motion_state_was_reported = true;
 		}
 
-		if (motion_state_changed || (last_zbus_publish_ts_ms == 0U) ||
+		if (motion_state_has_changed or (last_zbus_publish_ts_ms == 0U) or
 		    ((now_ms - last_zbus_publish_ts_ms) >= ACCEL_ZBUS_PUBLISH_INTERVAL_MS)) {
-			(void)app_zbus_publish_accel_sample(moving_now, speed_mm_s,
+			(void)app_zbus_publish_accel_sample(is_moving_now, speed_mm_s,
 							    linear_accel_mg, quiet_time_ms,
 							    xyz_mg, linear_xyz_mg);
 			last_zbus_publish_ts_ms = now_ms;
@@ -393,7 +409,7 @@ int accel_start(void)
 		return -ENODEV;
 	}
 
-	if (!device_is_ready(accel_dev)) {
+	if (not device_is_ready(accel_dev)) {
 		LOG_WRN("Accelerometer device %s is not ready", accel_dev->name);
 		return -ENODEV;
 	}
