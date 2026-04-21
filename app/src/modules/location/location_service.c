@@ -2,6 +2,10 @@
 #include "cloud_service.h"
 #include "app_events.h"
 
+#if defined(CONFIG_APP_FIELD_LOG)
+#include "field_log.h"
+#endif
+
 #include <modem/location.h>
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
@@ -51,6 +55,14 @@ static void location_event_handler(const struct location_event_data *event_data)
             (double)event_data->location.latitude,
             (double)event_data->location.longitude,
             (double)event_data->location.accuracy);
+
+#if defined(CONFIG_APP_FIELD_LOG)
+        field_log_note_location(FIELD_LOG_LOCATION_LTE,
+                                event_data->location.latitude,
+                                event_data->location.longitude,
+                                event_data->location.accuracy);
+#endif
+
         err = publish_lte_loc_ok(&event_data->location); 
         LOG_INF("Published EVT_lOC_OK err=%d", err);
         break;
