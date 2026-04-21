@@ -80,7 +80,6 @@ def configure_ppk2(port: str) -> PPK2_API:
     print("Using patched ppk2")
     ppk2 = PatchedPPK2(port)
 
-    # Flush buffers before reading metadata.
     time.sleep(0.1)
     ppk2.ser.reset_input_buffer()
     ppk2.ser.reset_output_buffer()
@@ -98,20 +97,38 @@ def ppk_worker(ppk2: PPK2_API) -> None:
     ppk2.start_measuring()
     print("PPK2 measuring started")
 
+    window_duration = 3.0
+    window_start = time.perf_counter()
+    window_samples = []
+
     try:
         while not stop_event.is_set():
             read_data = ppk2.get_data()
             if read_data:
                 samples, flags = ppk2.get_samples(read_data)
-
-                # Keep the worker light for now.
-                # Uncomment for quick sanity checks if needed.
-                #
                 if samples:
-                    avg = sum(samples) / len(samples)
-                    print(f"[PPK] avg={avg:.2f} uA ({len(samples)} samples)")
+                    window_samples.extend(samples)
 
-            time.sleep(0.1)
+            now = time.perf_counter()
+
+            if now - window_start >= window_duration:
+                if window_samples:
+                    avg = sum(window_samples) / len(window_samples)
+                    max_val = max(window_samples)
+
+                    print(
+                        f"[PPK][3s] avg={avg:.2f} uA | "
+                        f"max={max_val:.2f} uA | "
+                        f"samples={len(window_samples)}"
+                    )
+                else:
+                    print("[PPK][3s] no samples")
+
+                # reset vindu
+                window_samples.clear()
+                window_start = now
+
+            time.sleep(0.01)  # litt raskere enn før for bedre sampling
 
     finally:
         ppk2.stop_measuring()
