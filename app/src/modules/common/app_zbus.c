@@ -6,19 +6,16 @@
 
 #include "app_zbus.h"
 
+#if defined(CONFIG_APP_FIELD_LOG)
+#include "field_log.h"
+#endif
+
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
 
 LOG_MODULE_REGISTER(app_zbus, LOG_LEVEL_INF);
 
 ZBUS_OBS_DECLARE(app_fsm_sub);
-
-#if defined(CONFIG_APP_FIELD_LOG)
-ZBUS_OBS_DECLARE(field_log_batt_sub);
-#define APP_BATTERY_OBSERVERS ZBUS_OBSERVERS(field_log_batt_sub)
-#else
-#define APP_BATTERY_OBSERVERS ZBUS_OBSERVERS_EMPTY
-#endif
 
 ZBUS_CHAN_DEFINE(gnss_status_chan,
 		 struct app_gnss_status,
@@ -54,7 +51,7 @@ ZBUS_CHAN_DEFINE(battery_sample_chan,
 		 struct app_battery_sample,
 		 NULL,
 		 NULL,
-		 APP_BATTERY_OBSERVERS,
+		 ZBUS_OBSERVERS_EMPTY,
 		 ZBUS_MSG_INIT(.timestamp_ms = 0,
 			       .voltage_mv = 0,
 			       .current_ma = 0,
@@ -139,6 +136,10 @@ int app_zbus_publish_battery_sample(int64_t voltage_mv, int64_t current_ma,
 		.charger_error = charger_error,
 		.vbus_present = vbus_present,
 	};
+
+#if defined(CONFIG_APP_FIELD_LOG)
+	field_log_note_battery_sample(&msg);
+#endif
 
 	return publish_status(&battery_sample_chan, &msg);
 }
