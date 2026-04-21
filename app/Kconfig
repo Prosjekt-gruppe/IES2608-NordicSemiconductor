@@ -16,4 +16,120 @@ config APP_GNSS_TIMEOUT_SEC
     help
       Timeout for GNSS acquisition before continuing.
 
+config APP_MODEM_SIGNAL_POLL_INTERVAL_SEC
+    int "LTE-M signal poll interval in seconds"
+    default 5
+    range 1 3600
+    help
+      Interval used by the modem service when sampling LTE-M RSRP while the
+      asset is moving.
+
+config APP_MODEM_SIGNAL_POLL_INTERVAL_STILL_SEC
+    int "LTE-M signal poll interval while stationary in seconds"
+    default 30
+    range 1 3600
+    help
+      Interval used by the modem service when the accelerometer reports that
+      the asset is standing still, or before any valid motion hint is available.
+
+config APP_MODEM_RSRP_FALLBACK_DBM
+    int "LTE-M RSRP threshold for NTN fallback"
+    default -105
+    range -140 -44
+    help
+      When the measured LTE-M RSRP is at or below this level and continues
+      to worsen, the modem service requests NTN fallback.
+
+config APP_MODEM_RSRP_RECOVERY_DBM
+    int "NTE->LTE recovery threshold"
+    default -90
+    range -120 -10
+    help
+      When LTE-M RSRP is showing signs of improving this value
+      decides if it should return to LTE-M-Connetion or not.
+
+config APP_MODEM_RSRP_DROP_DB
+    int "LTE-M RSRP drop needed to treat the trend as degrading"
+    default 5
+    range 1 40
+    help
+      Minimum drop in dB used by the modem service when deciding that the
+      LTE-M signal is degrading toward an NTN fallback.
+
+config APP_SENSOR_ACCEL_DEMO
+    bool "Enable accelerometer demo"
+    default y if BOARD_THINGY91X_NRF9151_NS
+    default n
+    help
+      Build the BMI270 accelerometer demo and motion-hint generation.
+      Enable this on boards that actually provide a compatible accelerometer.
+
+config APP_SENSOR_BATT_DEMO
+    bool "Enable battery demo"
+    default y if BOARD_THINGY91X_NRF9151_NS
+    default n
+    help
+      Build the nPM1300 battery/charger demo.
+      Enable this on boards that actually provide compatible battery hardware.
+
+config APP_SENSOR_TEMP_DEMO
+    bool "Enable temperature demo"
+    default y if BOARD_THINGY91X_NRF9151_NS
+    default n
+    help
+      Build the BME680 environmental sensor demo.
+      Enable this on boards that actually provide a compatible temperature sensor.
+
+config APP_CORE_SEND_UDP_DATA
+    bool "Send UDP data over NTN"
+    help
+      Enable UDP sending in the NTN module.
+
+config APP_CORE_SM_PROBE_TEST
+    bool "Start dry run for LTE-PROBE"
+    help
+      Enable LTE-Probe dry run.
+
+
 endmenu
+
+
+menu "APP Debug Options"
+
+config APP_DEBUG
+  bool "Enable debug features"
+  default n
+
+config APP_DEBUG_BOOT
+  bool "Halt in boot state after initalization"
+  depends on APP_DEBUG
+  default n
+  help 
+    Run boot_entry(), but do not transistion out of STATE_BOOT
+    when EVT_BOOT is received 
+
+config APP_DEBUG_LTE_CONNECTING
+  bool "Halt after LTE registration"
+  depends on APP_DEBUG
+  default n
+  help 
+    Allow LTE attach to complete, then stop before transistioning
+    STATE_LTEM_CONNECTED
+
+config APP_DEBUG_CLOUD_CONNECTING
+  bool "Halt after cloud connection"
+  depends on APP_DEBUG
+  default n
+  help 
+    Stop after cloud connection returns success, failure or disconnect,
+    instead of continuing to later stages. 
+
+config APP_DEBUG_LTE_LOCATION
+  bool "Halt after LTE location result"
+  depends on APP_DEBUG
+  default n
+  help 
+    Stop after LTE cellular location returns sucess, failure or timeout, 
+    instead of continuing to later stages
+endmenu
+

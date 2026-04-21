@@ -6,5 +6,8 @@
 
 #pragma once
 
+#include "app_types.h"
+
+
 int modem_service_init(void);
-int modem_service_connect_async(void);
+int modem_service_udp_send_test(void);

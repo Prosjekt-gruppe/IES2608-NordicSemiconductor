@@ -10,49 +10,24 @@
 #include <modem/lte_lc.h>
 #include "modem_service.h"
 
+
+#include <zephyr/net/socket.h>
+#include <arpa/inet.h>
+#include <errno.h>
+#include <unistd.h>
+#include <zephyr/net/net_ip.h>
+
 #include <zephyr/logging/log.h>
 //#include <zephyr/kernel.h>
 
+/* for udp test */
+#define SERVER_PORT 57967 // port 
+#define SERVER_ADDR "46.226.106.127" // tcpbin.net
+
+
 LOG_MODULE_REGISTER(modem_service, LOG_LEVEL_INF);
 
-static void lte_lc_evt_handler(const struct lte_lc_evt *const evt)
-{
-    struct app_event app_ev = {0};
 
-    switch (evt->type) {
-    case LTE_LC_EVT_NW_REG_STATUS:
-        switch (evt->nw_reg_status) {
-        case LTE_LC_NW_REG_REGISTERED_HOME:
-        case LTE_LC_NW_REG_REGISTERED_ROAMING:
-            app_ev.type = EVT_REG_OK;
-            (void)app_event_put(&app_ev, K_NO_WAIT);
-            break;
-
-        case LTE_LC_NW_REG_NOT_REGISTERED:
-        case LTE_LC_NW_REG_REGISTRATION_DENIED:
-        case LTE_LC_NW_REG_UNKNOWN:
-        case LTE_LC_NW_REG_UICC_FAIL:
-            app_ev.type = EVT_REG_FAIL;
-            (void)app_event_put(&app_ev, K_NO_WAIT);
-            break;
-
-        default:
-            break;
-        }
-        break;
-
-    case LTE_LC_EVT_CELLULAR_PROFILE_ACTIVE:
-        LOG_INF("modem activate cellular profile (RAT starting)");
-        break;
-
-    case LTE_LC_EVT_LTE_MODE_UPDATE:
-        LOG_INF("LTE mode update %d", evt->lte_mode);
-        break;
-
-    default:
-        break;
-    }
-}
 
 int modem_service_init(void){ 
     int err; 
@@ -66,7 +41,26 @@ int modem_service_init(void){
     return 0;
 }
 
-int modem_service_connect_async(void)
+int modem_service_udp_send_test(void)
 {
-    return lte_lc_connect_async(lte_lc_evt_handler);
+    int sock;
+    struct sockaddr_in addr = {0};
+    int err;
+
+    sock = zsock_socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+    if (sock < 0) {
+        LOG_ERR("socket failed: %d", errno);
+        return -errno;
+    }
+
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(SERVER_PORT);
+    zsock_inet_pton(AF_INET, SERVER_ADDR, &addr.sin_addr);
+
+    /* send 'a' to tcpbin */
+    err = zsock_sendto(sock, "a", 1, 0,
+                    (struct sockaddr *)&addr,
+                    sizeof(addr));
+    zsock_close(sock);
+    return 0;
 }

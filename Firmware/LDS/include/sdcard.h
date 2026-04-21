@@ -1,5 +1,23 @@
 
 
+
+void SDinit(){
+  // Initialize SD card at 25 MHz (safe for most SD modules)
+  if (!SD.begin(CS, SPI, 25000000)) {
+    Serial.println("Card Mount Failed");
+    while (true) { delay(1000); } // halt safely
+  }
+  uint8_t cardType = SD.cardType();
+  if (cardType == CARD_NONE) {
+    Serial.println("No SD card attached");
+    while (true) { delay(1000); } // halt safely
+  }
+  Serial.println("SD card initialized successfully!");
+
+}
+
+
+
 void listDir(fs::FS &fs, const char * dirname, uint8_t levels){
   Serial.printf("Listing directory: %s\n", dirname);
 

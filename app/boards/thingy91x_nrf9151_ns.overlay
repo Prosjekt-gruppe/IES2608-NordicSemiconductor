@@ -1,0 +1,17 @@
+/*
+ * Enable the Thingy:91 X onboard sensors used by the app demos.
+ */
+
+/ {
+	aliases {
+		accel0 = &accelerometer_hp;
+	};
+};
+
+&accelerometer_hp {
+	status = "okay";
+};
+
+&bme680 {
+	status = "okay";
+};

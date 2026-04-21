@@ -4,7 +4,9 @@
  * SPDX-License-Identifier: LicenseRef-Nordic-5-Clause
  */ 
 #include "gnss_service.h"
-#include "app_zbus.h"
+//#include "app_zbus.h"
+
+#include "app_events.h"
 
 #include <stdbool.h>
 #include <nrf_modem_gnss.h>
@@ -20,12 +22,51 @@ static struct nrf_modem_gnss_pvt_data_frame pvt_data;
 static int64_t gnss_start_time;
 static bool first_fix;
 
+
+static int publish_timeout(void)
+{
+    struct app_event ev = {
+        .type = EVT_GNSS_TIMEOUT,
+    };
+
+    return app_event_put(&ev, K_NO_WAIT);
+}
+
+static int publish_fix(const struct nrf_modem_gnss_pvt_data_frame *pvt)
+{
+    struct app_event ev = {
+        .type = EVT_GNSS_FIX,
+    };
+
+    ev.pvt.latitude = pvt->latitude;
+    ev.pvt.longitude = pvt->longitude;
+    ev.pvt.altitude = pvt->altitude;
+
+    return app_event_put(&ev, K_NO_WAIT);
+}
+
+static int publish_error_as_timeout(int err)
+{
+    LOG_WRN("GNSS error %d, treating as timeout", err);
+    return publish_timeout();
+}
+
+
+static int handle_error(int err)
+{
+    LOG_ERR("GNSS service error, err=%d", err);
+    (void)publish_error_as_timeout(err);
+    return err;
+}
+
+/*
 static int publish_error(int err)
 {
     (void)app_zbus_publish_gnss_status(APP_GNSS_STATE_ERROR, err, -1, 0.0, 0.0, 0.0f, 0);
 
     return err;
 }
+*/
 
 static uint8_t count_tracked_satellites(const struct nrf_modem_gnss_pvt_data_frame *pvt)
 {
@@ -51,7 +92,9 @@ static void gnss_timeout_work_handler(struct k_work *work)
 {
     ARG_UNUSED(work);
 
-    int err = app_zbus_publish_gnss_status(APP_GNSS_STATE_TIMEOUT, 0, -1, 0.0, 0.0, 0.0f, 0);
+    //int err = app_zbus_publish_gnss_status(APP_GNSS_STATE_TIMEOUT, 0, -1, 0.0, 0.0, 0.0f, 0);
+
+    int err = publish_timeout();
 
     LOG_INF("gnss timeout fired, publish err=%d", err);
 }
@@ -66,7 +109,7 @@ static void gnss_pvt_work_handler(struct k_work *work)
 
     if (err) {
         LOG_ERR("nrf_modem_gnss_read failed, err=%d", err);
-        (void)publish_error(err);
+        (void)handle_error(err);
         return;
     }
 
@@ -84,9 +127,12 @@ static void gnss_pvt_work_handler(struct k_work *work)
     }
 
     log_fix_data(&pvt_data);
-    err = app_zbus_publish_gnss_status(APP_GNSS_STATE_FIX, 0, ttff_ms,
-                                       pvt_data.latitude, pvt_data.longitude,
-                                       pvt_data.altitude, satellites);
+    //err = app_zbus_publish_gnss_status(APP_GNSS_STATE_FIX, 0, ttff_ms,
+    //                                   pvt_data.latitude, pvt_data.longitude,
+    //                                   pvt_data.altitude, satellites);
+    
+    err = publish_fix(&pvt_data);
+    
     LOG_INF("published GNSS fix status err=%d", err);
 }
 
@@ -110,11 +156,14 @@ int gnss_service_init(void)
     err = nrf_modem_gnss_event_handler_set(gnss_event_handler);
     if (err) {
         LOG_ERR("nrf_modem_gnss_event_handler_set failed, err=%d", err);
-        return publish_error(err);
+        return handle_error(err);
     }
 
-    (void)app_zbus_publish_gnss_status(APP_GNSS_STATE_INITIALIZED, 0, -1,
-                                       0.0, 0.0, 0.0f, 0);
+    //(void)app_zbus_publish_gnss_status(APP_GNSS_STATE_INITIALIZED, 0, -1,
+    //                                   0.0, 0.0, 0.0f, 0);
+    
+    LOG_INF("GNSS service initialized");
+    
     return 0;
 }
 
@@ -124,13 +173,16 @@ int gnss_service_start(void)
 
     if (err) {
         LOG_ERR("nrf_modem_gnss_start failed, err=%d", err);
-        return publish_error(err);
+        return handle_error(err);
     }
 
     first_fix = false;
     gnss_start_time = k_uptime_get();
-    (void)app_zbus_publish_gnss_status(APP_GNSS_STATE_STARTED, 0, -1,
-                                       0.0, 0.0, 0.0f, 0);
+    //(void)app_zbus_publish_gnss_status(APP_GNSS_STATE_STARTED, 0, -1,
+    //                                   0.0, 0.0, 0.0f, 0);
+    
+    LOG_INF("GNSS started");
+    
     return 0;
 }
 
@@ -139,8 +191,9 @@ int gnss_service_stop(void)
     int err = nrf_modem_gnss_stop();
 
     if (!err) {
-        (void)app_zbus_publish_gnss_status(APP_GNSS_STATE_IDLE, 0, -1,
-                                           0.0, 0.0, 0.0f, 0);
+        //(void)app_zbus_publish_gnss_status(APP_GNSS_STATE_IDLE, 0, -1,
+        //                                   0.0, 0.0, 0.0f, 0);
+        LOG_INF("GNSS stopped");
     }
 
     return err;
