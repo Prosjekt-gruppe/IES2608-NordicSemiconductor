@@ -36,6 +36,11 @@ LOG_MODULE_REGISTER(field_log, LOG_LEVEL_INF);
 #define FIELD_LOG_FLAG_NO_SAMPLES BIT(0)
 #define FIELD_LOG_FLAG_STORAGE_DISABLED BIT(1)
 #define FIELD_LOG_FLAG_VBUS_SEEN BIT(2)
+#define FIELD_LOG_CSV_HEADER \
+	"seq,uptime_s,interval_s,samples,avg_current_ma,min_current_ma,max_current_ma," \
+	"avg_voltage_mv,min_voltage_mv,last_voltage_mv,avg_temp_deci_c," \
+	"net_energy_interval_uwh,discharge_energy_interval_uwh," \
+	"discharge_energy_total_uwh,vbus_samples,flags"
 
 struct field_log_battery_summary_record {
 	uint16_t magic;
@@ -72,7 +77,16 @@ union field_log_msg {
 	struct app_battery_sample battery;
 };
 
-struct field_log_batt_accum {
+struct field_log_storage_state {
+	const struct flash_area *area;
+	size_t capacity_bytes;
+	off_t write_offset;
+	uint32_t next_sequence;
+	bool ready;
+	bool full;
+};
+
+struct field_log_battery_accumulator {
 	bool have_last_sample;
 	struct app_battery_sample last_sample;
 	int64_t last_energy_timestamp_ms;
@@ -90,20 +104,20 @@ struct field_log_batt_accum {
 	int64_t discharge_energy_total_uwh;
 };
 
+enum field_log_slot_state {
+	FIELD_LOG_SLOT_VALID,
+	FIELD_LOG_SLOT_EMPTY,
+	FIELD_LOG_SLOT_INVALID,
+};
+
 static K_THREAD_STACK_DEFINE(field_log_stack, FIELD_LOG_STACK_SIZE);
 static struct k_thread field_log_thread_data;
 static bool field_log_started;
 
-static const struct flash_area *storage_area;
-static size_t storage_capacity;
-static off_t storage_write_offset;
-static uint32_t next_sequence;
-static bool storage_ready;
-static bool storage_full;
-
 K_MUTEX_DEFINE(field_log_storage_mutex);
 
-static struct field_log_batt_accum batt_accum;
+static struct field_log_storage_state storage;
+static struct field_log_battery_accumulator battery_accum;
 
 static uint16_t crc16_ccitt(const uint8_t *data, size_t len)
 {
@@ -186,11 +200,48 @@ static uint32_t clamp_u32(int64_t value)
 	return (uint32_t)clamp_i64(value, 0, UINT32_MAX);
 }
 
-static int field_log_storage_erase_range(void)
+static bool field_log_storage_available(void)
 {
-	for (off_t offset = 0; offset < storage_capacity;
+	return storage.area != NULL && storage.capacity_bytes >= FIELD_LOG_RECORD_SIZE;
+}
+
+static void field_log_storage_reset_cursor(void)
+{
+	storage.write_offset = 0;
+	storage.next_sequence = 0;
+	storage.full = false;
+}
+
+static int field_log_storage_read_slot(off_t offset,
+				       struct field_log_battery_summary_record *record,
+				       enum field_log_slot_state *slot_state)
+{
+	int err = flash_area_read(storage.area, offset, record, sizeof(*record));
+
+	if (err) {
+		LOG_ERR("Field log read failed at 0x%lx: %d", (long)offset, err);
+		return err;
+	}
+
+	if (record_is_erased(record)) {
+		*slot_state = FIELD_LOG_SLOT_EMPTY;
+		return 0;
+	}
+
+	if (!record_is_valid(record)) {
+		*slot_state = FIELD_LOG_SLOT_INVALID;
+		return 0;
+	}
+
+	*slot_state = FIELD_LOG_SLOT_VALID;
+	return 0;
+}
+
+static int field_log_storage_erase_all(void)
+{
+	for (off_t offset = 0; offset < storage.capacity_bytes;
 	     offset += CONFIG_APP_FIELD_LOG_ERASE_BLOCK_SIZE) {
-		int err = flash_area_erase(storage_area, offset,
+		int err = flash_area_erase(storage.area, offset,
 					   CONFIG_APP_FIELD_LOG_ERASE_BLOCK_SIZE);
 
 		if (err) {
@@ -206,37 +257,34 @@ static int field_log_storage_erase_range(void)
 static int field_log_storage_scan(void)
 {
 	struct field_log_battery_summary_record record;
+	enum field_log_slot_state slot_state;
 
-	storage_write_offset = 0;
-	next_sequence = 0;
+	field_log_storage_reset_cursor();
 
-	for (off_t offset = 0; offset + sizeof(record) <= storage_capacity;
+	for (off_t offset = 0; offset + sizeof(record) <= storage.capacity_bytes;
 	     offset += sizeof(record)) {
-		int err = flash_area_read(storage_area, offset, &record, sizeof(record));
-
+		int err = field_log_storage_read_slot(offset, &record, &slot_state);
 		if (err) {
-			LOG_ERR("Field log scan read failed at 0x%lx: %d",
-				(long)offset, err);
 			return err;
 		}
 
-		if (record_is_erased(&record)) {
-			storage_write_offset = offset;
+		if (slot_state == FIELD_LOG_SLOT_EMPTY) {
+			storage.write_offset = offset;
 			return 0;
 		}
 
-		if (!record_is_valid(&record)) {
+		if (slot_state == FIELD_LOG_SLOT_INVALID) {
 			LOG_WRN("Field log scan stopped at invalid record 0x%lx", (long)offset);
-			storage_full = true;
-			storage_write_offset = offset;
+			storage.full = true;
+			storage.write_offset = offset;
 			return -EBADMSG;
 		}
 
-		next_sequence = record.sequence + 1U;
-		storage_write_offset = offset + sizeof(record);
+		storage.next_sequence = record.sequence + 1U;
+		storage.write_offset = offset + sizeof(record);
 	}
 
-	storage_full = true;
+	storage.full = true;
 	return 0;
 }
 
@@ -248,34 +296,34 @@ static int field_log_storage_init(void)
 	LOG_WRN("Field log storage disabled: no PM_EXTERNAL_FLASH_ID partition");
 	return -ENODEV;
 #else
-	err = flash_area_open(PM_EXTERNAL_FLASH_ID, &storage_area);
+	err = flash_area_open(PM_EXTERNAL_FLASH_ID, &storage.area);
 	if (err) {
 		LOG_WRN("Field log storage disabled: flash_area_open failed: %d", err);
 		return err;
 	}
 
-	storage_capacity = MIN((size_t)storage_area->fa_size,
-			       (size_t)CONFIG_APP_FIELD_LOG_STORAGE_BYTES);
-	storage_capacity -= storage_capacity % CONFIG_APP_FIELD_LOG_ERASE_BLOCK_SIZE;
+	storage.capacity_bytes = MIN((size_t)storage.area->fa_size,
+				     (size_t)CONFIG_APP_FIELD_LOG_STORAGE_BYTES);
+	storage.capacity_bytes -= storage.capacity_bytes % CONFIG_APP_FIELD_LOG_ERASE_BLOCK_SIZE;
 
-	if (storage_capacity < sizeof(struct field_log_battery_summary_record)) {
+	if (storage.capacity_bytes < sizeof(struct field_log_battery_summary_record)) {
 		LOG_WRN("Field log storage disabled: capacity too small");
 		return -ENOSPC;
 	}
 
 	if (IS_ENABLED(CONFIG_APP_FIELD_LOG_ERASE_ON_BOOT)) {
-		err = field_log_storage_erase_range();
+		err = field_log_storage_erase_all();
 		if (err) {
 			return err;
 		}
 	}
 
 	err = field_log_storage_scan();
-	if ((err == -EBADMSG) && (storage_write_offset == 0)) {
+	if ((err == -EBADMSG) && (storage.write_offset == 0)) {
 		LOG_WRN("Field log storage has no valid first record; erasing prototype area");
-		storage_full = false;
+		storage.full = false;
 
-		err = field_log_storage_erase_range();
+		err = field_log_storage_erase_all();
 		if (err) {
 			return err;
 		}
@@ -292,109 +340,105 @@ static int field_log_storage_init(void)
 		return err;
 	}
 
-	storage_ready = !storage_full;
+	storage.ready = !storage.full;
 
 	LOG_INF("Field log storage: area=%u offset=0x%lx size=%zu next=0x%lx seq=%u",
 		PM_EXTERNAL_FLASH_ID,
-		(long)storage_area->fa_off,
-		storage_capacity,
-		(long)storage_write_offset,
-		next_sequence);
+		(long)storage.area->fa_off,
+		storage.capacity_bytes,
+		(long)storage.write_offset,
+		storage.next_sequence);
 
 	return 0;
 #endif
 }
 
-static int field_log_storage_write(const struct field_log_battery_summary_record *record)
+static int field_log_storage_append_record(const struct field_log_battery_summary_record *record)
 {
 	int err;
 
-	if (!storage_ready) {
+	if (!storage.ready) {
 		return -ENODEV;
 	}
 
-	if (storage_write_offset + sizeof(*record) > storage_capacity) {
-		storage_full = true;
-		storage_ready = false;
-		LOG_WRN("Field log storage full at 0x%lx", (long)storage_write_offset);
+	if (storage.write_offset + sizeof(*record) > storage.capacity_bytes) {
+		storage.full = true;
+		storage.ready = false;
+		LOG_WRN("Field log storage full at 0x%lx", (long)storage.write_offset);
 		return -ENOSPC;
 	}
 
-	if ((storage_write_offset % CONFIG_APP_FIELD_LOG_ERASE_BLOCK_SIZE) == 0) {
-		err = flash_area_erase(storage_area, storage_write_offset,
+	if ((storage.write_offset % CONFIG_APP_FIELD_LOG_ERASE_BLOCK_SIZE) == 0) {
+		err = flash_area_erase(storage.area, storage.write_offset,
 				       CONFIG_APP_FIELD_LOG_ERASE_BLOCK_SIZE);
 		if (err) {
 			LOG_ERR("Field log sector erase failed at 0x%lx: %d",
-				(long)storage_write_offset, err);
+				(long)storage.write_offset, err);
 			return err;
 		}
 	}
 
-	err = flash_area_write(storage_area, storage_write_offset, record, sizeof(*record));
+	err = flash_area_write(storage.area, storage.write_offset, record, sizeof(*record));
 	if (err) {
 		LOG_ERR("Field log write failed at 0x%lx: %d",
-			(long)storage_write_offset, err);
+			(long)storage.write_offset, err);
 		return err;
 	}
 
-	storage_write_offset += sizeof(*record);
+	storage.write_offset += sizeof(*record);
 
 	return 0;
 }
 
-static bool field_log_storage_available(void)
+static void battery_accumulator_reset_interval(int64_t start_ms)
 {
-	return storage_area != NULL && storage_capacity >= FIELD_LOG_RECORD_SIZE;
+	battery_accum.summary_start_ms = start_ms;
+	battery_accum.sample_count = 0;
+	battery_accum.vbus_sample_count = 0;
+	battery_accum.voltage_sum_mv = 0;
+	battery_accum.current_sum_ma = 0;
+	battery_accum.temp_sum_mdegc = 0;
+	battery_accum.min_voltage_mv = INT64_MAX;
+	battery_accum.min_current_ma = INT64_MAX;
+	battery_accum.max_current_ma = INT64_MIN;
+	battery_accum.net_energy_interval_uwh = 0;
+	battery_accum.discharge_energy_interval_uwh = 0;
 }
 
-static void field_log_batt_accum_reset_interval(int64_t start_ms)
-{
-	batt_accum.summary_start_ms = start_ms;
-	batt_accum.sample_count = 0;
-	batt_accum.vbus_sample_count = 0;
-	batt_accum.voltage_sum_mv = 0;
-	batt_accum.current_sum_ma = 0;
-	batt_accum.temp_sum_mdegc = 0;
-	batt_accum.min_voltage_mv = INT64_MAX;
-	batt_accum.min_current_ma = INT64_MAX;
-	batt_accum.max_current_ma = INT64_MIN;
-	batt_accum.net_energy_interval_uwh = 0;
-	batt_accum.discharge_energy_interval_uwh = 0;
-}
-
-static void field_log_integrate_until(int64_t timestamp_ms)
+static void battery_accumulator_integrate_until(int64_t timestamp_ms)
 {
 	int64_t delta_ms;
 	int64_t net_energy_uwh;
 	int64_t discharge_energy_uwh;
 
-	if (!batt_accum.have_last_sample) {
+	if (!battery_accum.have_last_sample) {
 		return;
 	}
 
-	if (timestamp_ms <= batt_accum.last_energy_timestamp_ms) {
+	if (timestamp_ms <= battery_accum.last_energy_timestamp_ms) {
 		return;
 	}
 
-	delta_ms = timestamp_ms - batt_accum.last_energy_timestamp_ms;
-	net_energy_uwh = (batt_accum.last_sample.voltage_mv *
-			  batt_accum.last_sample.current_ma *
+	delta_ms = timestamp_ms - battery_accum.last_energy_timestamp_ms;
+	net_energy_uwh = (battery_accum.last_sample.voltage_mv *
+			  battery_accum.last_sample.current_ma *
 			  delta_ms) / 3600000LL;
 
-	batt_accum.net_energy_interval_uwh += net_energy_uwh;
+	battery_accum.net_energy_interval_uwh += net_energy_uwh;
 
-	if (batt_accum.last_sample.current_ma < 0) {
-		discharge_energy_uwh = (batt_accum.last_sample.voltage_mv *
-					-batt_accum.last_sample.current_ma *
+	/* Battery API convention: negative current means discharging. */
+	if (battery_accum.last_sample.current_ma < 0) {
+		discharge_energy_uwh = (battery_accum.last_sample.voltage_mv *
+					-battery_accum.last_sample.current_ma *
 					delta_ms) / 3600000LL;
-		batt_accum.discharge_energy_interval_uwh += discharge_energy_uwh;
-		batt_accum.discharge_energy_total_uwh += discharge_energy_uwh;
+		battery_accum.discharge_energy_interval_uwh += discharge_energy_uwh;
+		battery_accum.discharge_energy_total_uwh += discharge_energy_uwh;
 	}
 
-	batt_accum.last_energy_timestamp_ms = timestamp_ms;
+	battery_accum.last_energy_timestamp_ms = timestamp_ms;
 }
 
-static void field_log_process_battery_sample(const struct app_battery_sample *sample)
+static void battery_accumulator_add_sample(const struct app_battery_sample *sample)
 {
 	int64_t sample_time_ms = sample->timestamp_ms;
 
@@ -402,119 +446,130 @@ static void field_log_process_battery_sample(const struct app_battery_sample *sa
 		sample_time_ms = k_uptime_get();
 	}
 
-	field_log_integrate_until(sample_time_ms);
+	battery_accumulator_integrate_until(sample_time_ms);
 
-	batt_accum.have_last_sample = true;
-	batt_accum.last_sample = *sample;
-	batt_accum.last_sample.timestamp_ms = sample_time_ms;
-	batt_accum.last_energy_timestamp_ms = sample_time_ms;
+	battery_accum.have_last_sample = true;
+	battery_accum.last_sample = *sample;
+	battery_accum.last_sample.timestamp_ms = sample_time_ms;
+	battery_accum.last_energy_timestamp_ms = sample_time_ms;
 
-	batt_accum.sample_count++;
-	batt_accum.voltage_sum_mv += sample->voltage_mv;
-	batt_accum.current_sum_ma += sample->current_ma;
-	batt_accum.temp_sum_mdegc += sample->temp_mdegc;
-	batt_accum.min_voltage_mv = MIN(batt_accum.min_voltage_mv, sample->voltage_mv);
-	batt_accum.min_current_ma = MIN(batt_accum.min_current_ma, sample->current_ma);
-	batt_accum.max_current_ma = MAX(batt_accum.max_current_ma, sample->current_ma);
+	battery_accum.sample_count++;
+	battery_accum.voltage_sum_mv += sample->voltage_mv;
+	battery_accum.current_sum_ma += sample->current_ma;
+	battery_accum.temp_sum_mdegc += sample->temp_mdegc;
+	battery_accum.min_voltage_mv = MIN(battery_accum.min_voltage_mv, sample->voltage_mv);
+	battery_accum.min_current_ma = MIN(battery_accum.min_current_ma, sample->current_ma);
+	battery_accum.max_current_ma = MAX(battery_accum.max_current_ma, sample->current_ma);
 
 	if (sample->vbus_present) {
-		batt_accum.vbus_sample_count++;
+		battery_accum.vbus_sample_count++;
 	}
 }
 
-static void field_log_build_battery_record(struct field_log_battery_summary_record *record,
-					   int64_t now_ms)
+static uint8_t battery_summary_flags(uint32_t sample_count)
 {
-	uint32_t sample_count = batt_accum.sample_count;
-	int64_t interval_ms = now_ms - batt_accum.summary_start_ms;
 	uint8_t flags = 0;
 
-	memset(record, 0, sizeof(*record));
-
-	if (sample_count == 0) {
+	if (sample_count == 0U) {
 		flags |= FIELD_LOG_FLAG_NO_SAMPLES;
 	}
 
-	if (!storage_ready) {
+	if (!storage.ready) {
 		flags |= FIELD_LOG_FLAG_STORAGE_DISABLED;
 	}
 
-	if (batt_accum.vbus_sample_count > 0) {
+	if (battery_accum.vbus_sample_count > 0U) {
 		flags |= FIELD_LOG_FLAG_VBUS_SEEN;
 	}
+
+	return flags;
+}
+
+static void battery_summary_build_record(struct field_log_battery_summary_record *record,
+					 int64_t now_ms)
+{
+	uint32_t sample_count = battery_accum.sample_count;
+	int64_t interval_ms = now_ms - battery_accum.summary_start_ms;
+
+	memset(record, 0, sizeof(*record));
 
 	record->magic = FIELD_LOG_RECORD_MAGIC;
 	record->version = FIELD_LOG_RECORD_VERSION;
 	record->type = FIELD_LOG_RECORD_TYPE_BATTERY_SUMMARY;
-	record->sequence = next_sequence;
+	record->sequence = storage.next_sequence;
 	record->uptime_s = clamp_u32(now_ms / 1000);
 	record->interval_s = clamp_u16(interval_ms / 1000);
 	record->sample_count = clamp_u16(sample_count);
-	record->flags = flags;
-	record->vbus_sample_count = clamp_u16(batt_accum.vbus_sample_count);
+	record->flags = battery_summary_flags(sample_count);
+	record->vbus_sample_count = clamp_u16(battery_accum.vbus_sample_count);
 
 	if (sample_count > 0) {
-		record->avg_current_ma = clamp_s16(batt_accum.current_sum_ma / sample_count);
-		record->min_current_ma = clamp_s16(batt_accum.min_current_ma);
-		record->max_current_ma = clamp_s16(batt_accum.max_current_ma);
-		record->avg_voltage_mv = clamp_u16(batt_accum.voltage_sum_mv / sample_count);
-		record->min_voltage_mv = clamp_u16(batt_accum.min_voltage_mv);
-		record->last_voltage_mv = clamp_u16(batt_accum.last_sample.voltage_mv);
+		record->avg_current_ma = clamp_s16(battery_accum.current_sum_ma / sample_count);
+		record->min_current_ma = clamp_s16(battery_accum.min_current_ma);
+		record->max_current_ma = clamp_s16(battery_accum.max_current_ma);
+		record->avg_voltage_mv = clamp_u16(battery_accum.voltage_sum_mv / sample_count);
+		record->min_voltage_mv = clamp_u16(battery_accum.min_voltage_mv);
+		record->last_voltage_mv = clamp_u16(battery_accum.last_sample.voltage_mv);
 		record->avg_temp_deci_c =
-			clamp_s16((batt_accum.temp_sum_mdegc / sample_count) / 100);
+			clamp_s16((battery_accum.temp_sum_mdegc / sample_count) / 100);
 	}
 
-	record->net_energy_interval_uwh = clamp_s32(batt_accum.net_energy_interval_uwh);
+	record->net_energy_interval_uwh = clamp_s32(battery_accum.net_energy_interval_uwh);
 	record->discharge_energy_interval_uwh =
-		clamp_u32(batt_accum.discharge_energy_interval_uwh);
+		clamp_u32(battery_accum.discharge_energy_interval_uwh);
 	record->discharge_energy_total_uwh =
-		clamp_u32(batt_accum.discharge_energy_total_uwh);
+		clamp_u32(battery_accum.discharge_energy_total_uwh);
 	record->crc16 = crc16_ccitt((const uint8_t *)record,
 				    offsetof(struct field_log_battery_summary_record, crc16));
 }
 
-static void field_log_publish_battery_summary(void)
+static void battery_summary_log(const struct field_log_battery_summary_record *record)
+{
+	if (record->sample_count == 0) {
+		LOG_WRN("Field log battery summary #%u: no samples, flags=0x%02x",
+			record->sequence, record->flags);
+		return;
+	}
+
+	LOG_INF("Field log battery summary #%u: samples=%u avg=%d mA min/max=%d/%d mA voltage avg/min/last=%u/%u/%u mV net=%d uWh discharge=%u/%u uWh vbus=%u flags=0x%02x",
+		record->sequence,
+		record->sample_count,
+		record->avg_current_ma,
+		record->min_current_ma,
+		record->max_current_ma,
+		record->avg_voltage_mv,
+		record->min_voltage_mv,
+		record->last_voltage_mv,
+		record->net_energy_interval_uwh,
+		record->discharge_energy_interval_uwh,
+		record->discharge_energy_total_uwh,
+		record->vbus_sample_count,
+		record->flags);
+}
+
+static void battery_summary_finalize_interval(void)
 {
 	struct field_log_battery_summary_record record;
 	int64_t now_ms = k_uptime_get();
 	int err;
 
-	field_log_integrate_until(now_ms);
+	battery_accumulator_integrate_until(now_ms);
 
 	k_mutex_lock(&field_log_storage_mutex, K_FOREVER);
 
-	field_log_build_battery_record(&record, now_ms);
+	battery_summary_build_record(&record, now_ms);
+	battery_summary_log(&record);
 
-	if (record.sample_count == 0) {
-		LOG_WRN("Field log battery summary #%u: no samples, flags=0x%02x",
-			record.sequence, record.flags);
-	} else {
-		LOG_INF("Field log battery summary #%u: samples=%u avg=%d mA min/max=%d/%d mA voltage avg/min/last=%u/%u/%u mV net=%d uWh discharge=%u/%u uWh vbus=%u flags=0x%02x",
-			record.sequence,
-			record.sample_count,
-			record.avg_current_ma,
-			record.min_current_ma,
-			record.max_current_ma,
-			record.avg_voltage_mv,
-			record.min_voltage_mv,
-			record.last_voltage_mv,
-			record.net_energy_interval_uwh,
-			record.discharge_energy_interval_uwh,
-			record.discharge_energy_total_uwh,
-			record.vbus_sample_count,
-			record.flags);
-	}
-
-	err = field_log_storage_write(&record);
+	err = field_log_storage_append_record(&record);
 	if (err == 0) {
-		next_sequence++;
+		storage.next_sequence++;
 	} else if (err != -ENODEV && err != -ENOSPC) {
 		LOG_WRN("Field log summary was not persisted: %d", err);
 	}
 
 	k_mutex_unlock(&field_log_storage_mutex);
 
-	field_log_batt_accum_reset_interval(now_ms);
+	battery_accumulator_reset_interval(now_ms);
 }
 
 static void field_log_thread(void *arg1, void *arg2, void *arg3)
@@ -526,7 +581,7 @@ static void field_log_thread(void *arg1, void *arg2, void *arg3)
 	ARG_UNUSED(arg2);
 	ARG_UNUSED(arg3);
 
-	field_log_batt_accum_reset_interval(k_uptime_get());
+	battery_accumulator_reset_interval(k_uptime_get());
 
 	while (true) {
 		const struct zbus_channel *chan;
@@ -536,14 +591,14 @@ static void field_log_thread(void *arg1, void *arg2, void *arg3)
 		int err;
 
 		if (wait_ms <= 0) {
-			field_log_publish_battery_summary();
+			battery_summary_finalize_interval();
 			next_summary_ms += CONFIG_APP_FIELD_LOG_SUMMARY_INTERVAL_SEC * 1000LL;
 			continue;
 		}
 
 		err = zbus_sub_wait_msg(&field_log_batt_sub, &chan, &msg, K_MSEC(wait_ms));
 		if (err == -EAGAIN || err == -ENOMSG) {
-			field_log_publish_battery_summary();
+			battery_summary_finalize_interval();
 			next_summary_ms += CONFIG_APP_FIELD_LOG_SUMMARY_INTERVAL_SEC * 1000LL;
 			continue;
 		}
@@ -554,7 +609,7 @@ static void field_log_thread(void *arg1, void *arg2, void *arg3)
 		}
 
 		if (chan == &battery_sample_chan) {
-			field_log_process_battery_sample(&msg.battery);
+			battery_accumulator_add_sample(&msg.battery);
 		}
 	}
 }
@@ -591,26 +646,26 @@ static int field_log_count_records(uint32_t *valid_records, off_t *stop_offset,
 				   bool *stopped_on_invalid)
 {
 	struct field_log_battery_summary_record record;
+	enum field_log_slot_state slot_state;
 	uint32_t count = 0;
 
 	*stopped_on_invalid = false;
 	*stop_offset = 0;
 
-	for (off_t offset = 0; offset + sizeof(record) <= storage_capacity;
+	for (off_t offset = 0; offset + sizeof(record) <= storage.capacity_bytes;
 	     offset += sizeof(record)) {
-		int err = flash_area_read(storage_area, offset, &record, sizeof(record));
-
+		int err = field_log_storage_read_slot(offset, &record, &slot_state);
 		if (err) {
 			return err;
 		}
 
-		if (record_is_erased(&record)) {
+		if (slot_state == FIELD_LOG_SLOT_EMPTY) {
 			*stop_offset = offset;
 			*valid_records = count;
 			return 0;
 		}
 
-		if (!record_is_valid(&record)) {
+		if (slot_state == FIELD_LOG_SLOT_INVALID) {
 			*stopped_on_invalid = true;
 			*stop_offset = offset;
 			*valid_records = count;
@@ -651,15 +706,15 @@ static int cmd_fieldlog_info(const struct shell *shell, size_t argc, char **argv
 #else
 	shell_print(shell, "  area_id: unavailable");
 #endif
-	shell_print(shell, "  area_offset: 0x%lx", (long)storage_area->fa_off);
-	shell_print(shell, "  capacity_bytes: %zu", storage_capacity);
+	shell_print(shell, "  area_offset: 0x%lx", (long)storage.area->fa_off);
+	shell_print(shell, "  capacity_bytes: %zu", storage.capacity_bytes);
 	shell_print(shell, "  record_size_bytes: %u", FIELD_LOG_RECORD_SIZE);
 	shell_print(shell, "  valid_records: %u", valid_records);
 	shell_print(shell, "  stop_offset: 0x%lx", (long)stop_offset);
-	shell_print(shell, "  write_offset: 0x%lx", (long)storage_write_offset);
-	shell_print(shell, "  next_sequence: %u", next_sequence);
-	shell_print(shell, "  storage_ready: %u", storage_ready ? 1U : 0U);
-	shell_print(shell, "  storage_full: %u", storage_full ? 1U : 0U);
+	shell_print(shell, "  write_offset: 0x%lx", (long)storage.write_offset);
+	shell_print(shell, "  next_sequence: %u", storage.next_sequence);
+	shell_print(shell, "  storage_ready: %u", storage.ready ? 1U : 0U);
+	shell_print(shell, "  storage_full: %u", storage.full ? 1U : 0U);
 	shell_print(shell, "  stopped_on_invalid: %u", stopped_on_invalid ? 1U : 0U);
 
 	k_mutex_unlock(&field_log_storage_mutex);
@@ -697,6 +752,7 @@ static void shell_print_battery_record(const struct shell *shell,
 static int cmd_fieldlog_dump(const struct shell *shell, size_t argc, char **argv)
 {
 	struct field_log_battery_summary_record record;
+	enum field_log_slot_state slot_state;
 	uint32_t count = 0;
 	int err = 0;
 
@@ -712,22 +768,21 @@ static int cmd_fieldlog_dump(const struct shell *shell, size_t argc, char **argv
 	}
 
 	shell_print(shell, "# fieldlog battery summary csv v1");
-	shell_print(shell,
-		    "seq,uptime_s,interval_s,samples,avg_current_ma,min_current_ma,max_current_ma,avg_voltage_mv,min_voltage_mv,last_voltage_mv,avg_temp_deci_c,net_energy_interval_uwh,discharge_energy_interval_uwh,discharge_energy_total_uwh,vbus_samples,flags");
+	shell_print(shell, FIELD_LOG_CSV_HEADER);
 
-	for (off_t offset = 0; offset + sizeof(record) <= storage_capacity;
+	for (off_t offset = 0; offset + sizeof(record) <= storage.capacity_bytes;
 	     offset += sizeof(record)) {
-		err = flash_area_read(storage_area, offset, &record, sizeof(record));
+		err = field_log_storage_read_slot(offset, &record, &slot_state);
 		if (err) {
 			shell_error(shell, "read failed at 0x%lx: %d", (long)offset, err);
 			break;
 		}
 
-		if (record_is_erased(&record)) {
+		if (slot_state == FIELD_LOG_SLOT_EMPTY) {
 			break;
 		}
 
-		if (!record_is_valid(&record)) {
+		if (slot_state == FIELD_LOG_SLOT_INVALID) {
 			shell_error(shell, "invalid record at 0x%lx; stopping dump",
 				    (long)offset);
 			break;
@@ -759,17 +814,15 @@ static int cmd_fieldlog_erase(const struct shell *shell, size_t argc, char **arg
 		return -ENODEV;
 	}
 
-	err = field_log_storage_erase_range();
+	err = field_log_storage_erase_all();
 	if (err) {
 		k_mutex_unlock(&field_log_storage_mutex);
 		shell_error(shell, "erase failed: %d", err);
 		return err;
 	}
 
-	storage_write_offset = 0;
-	next_sequence = 0;
-	storage_full = false;
-	storage_ready = true;
+	field_log_storage_reset_cursor();
+	storage.ready = true;
 
 	k_mutex_unlock(&field_log_storage_mutex);
 
