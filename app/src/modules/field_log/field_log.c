@@ -542,7 +542,7 @@ static void field_log_thread(void *arg1, void *arg2, void *arg3)
 		}
 
 		err = zbus_sub_wait_msg(&field_log_batt_sub, &chan, &msg, K_MSEC(wait_ms));
-		if (err == -EAGAIN) {
+		if (err == -EAGAIN || err == -ENOMSG) {
 			field_log_publish_battery_summary();
 			next_summary_ms += CONFIG_APP_FIELD_LOG_SUMMARY_INTERVAL_SEC * 1000LL;
 			continue;
