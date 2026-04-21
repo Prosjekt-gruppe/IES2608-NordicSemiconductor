@@ -2,6 +2,10 @@
 """
 Decode `fieldlog dump` output into a more readable table or expanded CSV/JSON.
 
+Supported formats:
+- v2 mixed field log rows: state changes + 10-minute summaries
+- v1 legacy battery-only summary rows
+
 The parser is intentionally tolerant:
 - It accepts plain `fieldlog dump` CSV lines.
 - It ignores shell prompts, comments, and unrelated log lines.
@@ -21,12 +25,11 @@ import csv
 import json
 import re
 import sys
-from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Iterable, List, Sequence
 
 
-ROW_PATTERN = re.compile(
+LEGACY_ROW_PATTERN = re.compile(
     r"(?P<row>"
     r"\d+,\d+,\d+,\d+,"
     r"-?\d+,-?\d+,-?\d+,"
@@ -37,121 +40,13 @@ ROW_PATTERN = re.compile(
     r")"
 )
 
+V2_PREFIXES = ("state,", "summary,")
 
-FLAG_NO_SAMPLES = 1 << 0
-FLAG_STORAGE_DISABLED = 1 << 1
-FLAG_VBUS_SEEN = 1 << 2
-
-
-@dataclass
-class FieldLogRow:
-    seq: int
-    uptime_s: int
-    interval_s: int
-    samples: int
-    avg_current_ma: int
-    min_current_ma: int
-    max_current_ma: int
-    avg_voltage_mv: int
-    min_voltage_mv: int
-    last_voltage_mv: int
-    avg_temp_deci_c: int
-    net_energy_interval_uwh: int
-    discharge_energy_interval_uwh: int
-    discharge_energy_total_uwh: int
-    vbus_samples: int
-    flags_raw: int
-
-    @property
-    def uptime_hms(self) -> str:
-        return seconds_to_hms(self.uptime_s)
-
-    @property
-    def interval_hms(self) -> str:
-        return seconds_to_hms(self.interval_s)
-
-    @property
-    def avg_temp_c(self) -> float:
-        return self.avg_temp_deci_c / 10.0
-
-    @property
-    def net_energy_interval_mwh(self) -> float:
-        return self.net_energy_interval_uwh / 1000.0
-
-    @property
-    def discharge_energy_interval_mwh(self) -> float:
-        return self.discharge_energy_interval_uwh / 1000.0
-
-    @property
-    def discharge_energy_total_mwh(self) -> float:
-        return self.discharge_energy_total_uwh / 1000.0
-
-    @property
-    def no_samples(self) -> bool:
-        return bool(self.flags_raw & FLAG_NO_SAMPLES)
-
-    @property
-    def storage_disabled(self) -> bool:
-        return bool(self.flags_raw & FLAG_STORAGE_DISABLED)
-
-    @property
-    def vbus_seen(self) -> bool:
-        return bool(self.flags_raw & FLAG_VBUS_SEEN)
-
-    @property
-    def flags_text(self) -> str:
-        names = []
-        if self.no_samples:
-            names.append("no_samples")
-        if self.storage_disabled:
-            names.append("storage_disabled")
-        if self.vbus_seen:
-            names.append("vbus_seen")
-        return "|".join(names) if names else "-"
-
-    @property
-    def power_state(self) -> str:
-        # Zephyr battery convention: positive current means charging, negative means discharging.
-        if self.vbus_seen:
-            if self.avg_current_ma > 0:
-                return "usb_charging"
-            if self.avg_current_ma < 0:
-                return "usb_plus_load"
-            return "usb_idle"
-
-        if self.avg_current_ma < 0:
-            return "battery_discharge"
-        if self.avg_current_ma > 0:
-            return "battery_charge"
-        return "battery_idle"
-
-    @property
-    def current_triplet(self) -> str:
-        return f"{self.avg_current_ma}/{self.min_current_ma}/{self.max_current_ma}"
-
-    @property
-    def voltage_triplet(self) -> str:
-        return f"{self.avg_voltage_mv}/{self.min_voltage_mv}/{self.last_voltage_mv}"
-
-    def to_expanded_dict(self) -> dict:
-        data = asdict(self)
-        data.update(
-            {
-                "uptime_hms": self.uptime_hms,
-                "interval_hms": self.interval_hms,
-                "avg_temp_c": round(self.avg_temp_c, 1),
-                "net_energy_interval_mwh": round(self.net_energy_interval_mwh, 3),
-                "discharge_energy_interval_mwh": round(self.discharge_energy_interval_mwh, 3),
-                "discharge_energy_total_mwh": round(self.discharge_energy_total_mwh, 3),
-                "vbus_seen": self.vbus_seen,
-                "no_samples": self.no_samples,
-                "storage_disabled": self.storage_disabled,
-                "power_state": self.power_state,
-                "flags_hex": f"0x{self.flags_raw:02X}",
-                "flags_text": self.flags_text,
-            }
-        )
-        return data
+FLAG_NO_BATTERY_SAMPLES = 1 << 0
+FLAG_VBUS_SEEN_V2 = 1 << 1
+FLAG_STORAGE_DISABLED_V2 = 1 << 2
+FLAG_STORAGE_DISABLED_V1 = 1 << 1
+FLAG_VBUS_SEEN_V1 = 1 << 2
 
 
 def seconds_to_hms(total_seconds: int) -> str:
@@ -160,7 +55,36 @@ def seconds_to_hms(total_seconds: int) -> str:
     return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
 
 
-def parse_row(row_text: str) -> FieldLogRow:
+def parse_optional_int(value: str) -> int | None:
+    value = value.strip()
+    if not value:
+        return None
+    return int(value)
+
+
+def decode_v2_flags(flags_raw: int) -> str:
+    names: List[str] = []
+    if flags_raw & FLAG_NO_BATTERY_SAMPLES:
+        names.append("no_battery_samples")
+    if flags_raw & FLAG_VBUS_SEEN_V2:
+        names.append("vbus_seen")
+    if flags_raw & FLAG_STORAGE_DISABLED_V2:
+        names.append("storage_disabled")
+    return "|".join(names) if names else "-"
+
+
+def decode_v1_flags(flags_raw: int) -> str:
+    names: List[str] = []
+    if flags_raw & FLAG_NO_BATTERY_SAMPLES:
+        names.append("no_samples")
+    if flags_raw & FLAG_STORAGE_DISABLED_V1:
+        names.append("storage_disabled")
+    if flags_raw & FLAG_VBUS_SEEN_V1:
+        names.append("vbus_seen")
+    return "|".join(names) if names else "-"
+
+
+def parse_legacy_row(row_text: str) -> dict:
     parts = [part.strip() for part in row_text.split(",")]
     if len(parts) != 16:
         raise ValueError(f"expected 16 columns, got {len(parts)}: {row_text!r}")
@@ -175,36 +99,116 @@ def parse_row(row_text: str) -> FieldLogRow:
     vbus_samples = int(parts[14])
     flags_raw = int(parts[15], 16)
 
-    return FieldLogRow(
-        seq=seq,
-        uptime_s=uptime_s,
-        interval_s=interval_s,
-        samples=samples,
-        avg_current_ma=avg_current_ma,
-        min_current_ma=min_current_ma,
-        max_current_ma=max_current_ma,
-        avg_voltage_mv=avg_voltage_mv,
-        min_voltage_mv=min_voltage_mv,
-        last_voltage_mv=last_voltage_mv,
-        avg_temp_deci_c=avg_temp_deci_c,
-        net_energy_interval_uwh=net_energy_interval_uwh,
-        discharge_energy_interval_uwh=discharge_energy_interval_uwh,
-        discharge_energy_total_uwh=discharge_energy_total_uwh,
-        vbus_samples=vbus_samples,
-        flags_raw=flags_raw,
-    )
+    return {
+        "type": "battery_v1",
+        "seq": seq,
+        "uptime_s": uptime_s,
+        "uptime_hms": seconds_to_hms(uptime_s),
+        "interval_s": interval_s,
+        "interval_hms": seconds_to_hms(interval_s),
+        "samples": samples,
+        "avg_current_ma": avg_current_ma,
+        "min_current_ma": min_current_ma,
+        "max_current_ma": max_current_ma,
+        "avg_voltage_mv": avg_voltage_mv,
+        "min_voltage_mv": min_voltage_mv,
+        "last_voltage_mv": last_voltage_mv,
+        "avg_temp_c": avg_temp_deci_c / 10.0,
+        "net_energy_interval_uwh": net_energy_interval_uwh,
+        "discharge_energy_interval_uwh": discharge_energy_interval_uwh,
+        "discharge_energy_total_uwh": discharge_energy_total_uwh,
+        "vbus_samples": vbus_samples,
+        "flags_raw": flags_raw,
+        "flags_hex": f"0x{flags_raw:02X}",
+        "flags_text": decode_v1_flags(flags_raw),
+    }
 
 
-def parse_lines(lines: Iterable[str]) -> List[FieldLogRow]:
-    rows: List[FieldLogRow] = []
+def parse_v2_row(row_text: str) -> dict:
+    parts = next(csv.reader([row_text]))
+    if len(parts) != 22:
+        raise ValueError(f"expected 22 columns, got {len(parts)}: {row_text!r}")
+
+    row_type = parts[0].strip()
+    seq = int(parts[1])
+    uptime_s = int(parts[2])
+
+    if row_type == "state":
+        accuracy_m = parse_optional_int(parts[11])
+        return {
+            "type": "state",
+            "seq": seq,
+            "uptime_s": uptime_s,
+            "uptime_hms": seconds_to_hms(uptime_s),
+            "from_state": parts[3].strip(),
+            "to_state": parts[4].strip(),
+            "reason": parts[5].strip(),
+            "active_rat": parts[6].strip(),
+            "next_rat": parts[7].strip(),
+            "location_source": parts[8].strip(),
+            "latitude": parts[9].strip(),
+            "longitude": parts[10].strip(),
+            "accuracy_m": accuracy_m,
+            "last_rsrp_dbm": int(parts[12]) if parts[12].strip() else None,
+        }
+
+    if row_type == "summary":
+        flags_text = decode_v2_flags(int(parts[20], 16))
+        return {
+            "type": "summary",
+            "seq": seq,
+            "uptime_s": uptime_s,
+            "uptime_hms": seconds_to_hms(uptime_s),
+            "interval_s": int(parts[13]),
+            "interval_hms": seconds_to_hms(int(parts[13])),
+            "power_interval_uwh": int(parts[14]),
+            "power_total_uwh": int(parts[15]),
+            "lte_losses_interval": int(parts[16]),
+            "lte_losses_total": int(parts[17]),
+            "switchbacks_interval": int(parts[18]),
+            "switchbacks_total": int(parts[19]),
+            "flags_raw": int(parts[20], 16),
+            "flags_hex": parts[20].strip(),
+            "flags_text": flags_text,
+            "dropped_messages": int(parts[21]),
+        }
+
+    raise ValueError(f"unknown row type: {row_type!r}")
+
+
+def extract_row_text(line: str) -> str | None:
+    stripped = line.strip()
+    if not stripped or stripped.startswith("#"):
+        return None
+    if stripped.startswith("type,"):
+        return None
+
+    for prefix in V2_PREFIXES:
+        idx = line.find(prefix)
+        if idx >= 0:
+            return line[idx:].strip()
+
+    match = LEGACY_ROW_PATTERN.search(line)
+    if match:
+        return match.group("row")
+
+    return None
+
+
+def parse_lines(lines: Iterable[str]) -> List[dict]:
+    rows: List[dict] = []
 
     for line in lines:
-        match = ROW_PATTERN.search(line)
-        if not match:
+        row_text = extract_row_text(line)
+        if not row_text:
             continue
-        rows.append(parse_row(match.group("row")))
 
-    rows.sort(key=lambda row: row.seq)
+        if row_text.startswith(V2_PREFIXES):
+            rows.append(parse_v2_row(row_text))
+        else:
+            rows.append(parse_legacy_row(row_text))
+
+    rows.sort(key=lambda row: row["seq"])
     return rows
 
 
@@ -215,34 +219,56 @@ def read_input(path_str: str) -> List[str]:
     return Path(path_str).read_text(encoding="utf-8").splitlines()
 
 
-def build_summary(rows: Sequence[FieldLogRow]) -> List[tuple[str, str]]:
+def build_summary(rows: Sequence[dict]) -> List[tuple[str, str]]:
     if not rows:
         return [("records", "0")]
 
-    total_interval_s = sum(row.interval_s for row in rows)
-    total_net_uwh = sum(row.net_energy_interval_uwh for row in rows)
-    total_discharge_uwh = rows[-1].discharge_energy_total_uwh
-    vbus_records = sum(1 for row in rows if row.vbus_seen)
-    battery_records = len(rows) - vbus_records
-    min_voltage = min(row.min_voltage_mv for row in rows)
-    max_voltage = max(row.avg_voltage_mv for row in rows)
+    state_rows = [row for row in rows if row["type"] == "state"]
+    summary_rows = [row for row in rows if row["type"] == "summary"]
+    legacy_rows = [row for row in rows if row["type"] == "battery_v1"]
 
-    return [
+    summary: List[tuple[str, str]] = [
         ("records", str(len(rows))),
-        ("first_seq", str(rows[0].seq)),
-        ("last_seq", str(rows[-1].seq)),
-        ("uptime_start", rows[0].uptime_hms),
-        ("uptime_end", rows[-1].uptime_hms),
-        ("logged_duration", seconds_to_hms(total_interval_s)),
-        ("total_net_energy", f"{total_net_uwh} uWh ({total_net_uwh / 1000.0:.3f} mWh)"),
-        (
-            "total_discharge_energy",
-            f"{total_discharge_uwh} uWh ({total_discharge_uwh / 1000.0:.3f} mWh)",
-        ),
-        ("records_with_vbus", str(vbus_records)),
-        ("records_on_battery", str(battery_records)),
-        ("voltage_range_mv", f"{min_voltage}..{max_voltage}"),
+        ("first_seq", str(rows[0]["seq"])),
+        ("last_seq", str(rows[-1]["seq"])),
+        ("uptime_start", rows[0]["uptime_hms"]),
+        ("uptime_end", rows[-1]["uptime_hms"]),
     ]
+
+    if state_rows or summary_rows:
+        summary.extend(
+            [
+                ("state_changes", str(len(state_rows))),
+                ("summaries", str(len(summary_rows))),
+            ]
+        )
+        if summary_rows:
+            latest = summary_rows[-1]
+            summary.extend(
+                [
+                    (
+                        "total_power",
+                        f"{latest['power_total_uwh']} uWh ({latest['power_total_uwh'] / 1000.0:.3f} mWh)",
+                    ),
+                    ("lte_losses_total", str(latest["lte_losses_total"])),
+                    ("switchbacks_total", str(latest["switchbacks_total"])),
+                ]
+            )
+    elif legacy_rows:
+        total_interval_s = sum(row["interval_s"] for row in legacy_rows)
+        summary.extend(
+            [
+                ("legacy_rows", str(len(legacy_rows))),
+                ("logged_duration", seconds_to_hms(total_interval_s)),
+                (
+                    "total_discharge_energy",
+                    f"{legacy_rows[-1]['discharge_energy_total_uwh']} uWh "
+                    f"({legacy_rows[-1]['discharge_energy_total_uwh'] / 1000.0:.3f} mWh)",
+                ),
+            ]
+        )
+
+    return summary
 
 
 def render_summary(summary: Sequence[tuple[str, str]]) -> str:
@@ -250,41 +276,52 @@ def render_summary(summary: Sequence[tuple[str, str]]) -> str:
     return "\n".join(f"{key:<{key_width}} : {value}" for key, value in summary)
 
 
-def render_table(rows: Sequence[FieldLogRow]) -> str:
-    headers = [
-        "seq",
-        "uptime",
-        "int",
-        "samples",
-        "current a/min/max",
-        "voltage a/min/last",
-        "temp C",
-        "net uWh",
-        "dischg uWh",
-        "total uWh",
-        "vbus",
-        "state",
-        "flags",
-    ]
+def render_table(rows: Sequence[dict]) -> str:
+    headers = ["seq", "uptime", "type", "details"]
+    table_rows: List[List[str]] = []
 
-    table_rows = [
-        [
-            str(row.seq),
-            row.uptime_hms,
-            row.interval_hms,
-            str(row.samples),
-            row.current_triplet,
-            row.voltage_triplet,
-            f"{row.avg_temp_c:.1f}",
-            str(row.net_energy_interval_uwh),
-            str(row.discharge_energy_interval_uwh),
-            str(row.discharge_energy_total_uwh),
-            "yes" if row.vbus_seen else "no",
-            row.power_state,
-            row.flags_text,
-        ]
-        for row in rows
-    ]
+    for row in rows:
+        if row["type"] == "state":
+            location = row["location_source"]
+            if row["location_source"] != "none" and row["latitude"] and row["longitude"]:
+                if row["accuracy_m"] is None:
+                    location = f"{row['location_source']} {row['latitude']},{row['longitude']} acc=?"
+                else:
+                    location = (
+                        f"{row['location_source']} {row['latitude']},{row['longitude']} "
+                        f"acc={row['accuracy_m']}m"
+                    )
+            details = (
+                f"{row['from_state']} -> {row['to_state']} | {row['reason']} | "
+                f"rat={row['active_rat']}/{row['next_rat']} | loc={location}"
+            )
+            if row["last_rsrp_dbm"] is not None and row["last_rsrp_dbm"] > -30000:
+                details += f" | rsrp={row['last_rsrp_dbm']} dBm"
+        elif row["type"] == "summary":
+            details = (
+                f"interval={row['interval_hms']} | power={row['power_interval_uwh']}/"
+                f"{row['power_total_uwh']} uWh | lte_losses={row['lte_losses_interval']}/"
+                f"{row['lte_losses_total']} | switchbacks={row['switchbacks_interval']}/"
+                f"{row['switchbacks_total']} | dropped={row['dropped_messages']} | "
+                f"flags={row['flags_text']}"
+            )
+        else:
+            details = (
+                f"interval={row['interval_hms']} | current={row['avg_current_ma']}/"
+                f"{row['min_current_ma']}/{row['max_current_ma']} mA | "
+                f"voltage={row['avg_voltage_mv']}/{row['min_voltage_mv']}/"
+                f"{row['last_voltage_mv']} mV | discharge_total="
+                f"{row['discharge_energy_total_uwh']} uWh | flags={row['flags_text']}"
+            )
+
+        table_rows.append(
+            [
+                str(row["seq"]),
+                row["uptime_hms"],
+                row["type"],
+                details,
+            ]
+        )
 
     widths = [len(header) for header in headers]
     for row in table_rows:
@@ -295,17 +332,16 @@ def render_table(rows: Sequence[FieldLogRow]) -> str:
         return " | ".join(cell.ljust(widths[idx]) for idx, cell in enumerate(cells))
 
     separator = "-+-".join("-" * width for width in widths)
-
     lines = [format_row(headers), separator]
     lines.extend(format_row(row) for row in table_rows)
     return "\n".join(lines)
 
 
-def render_expanded_csv(rows: Sequence[FieldLogRow]) -> str:
+def render_expanded_csv(rows: Sequence[dict]) -> str:
     if not rows:
         return ""
 
-    fieldnames = list(rows[0].to_expanded_dict().keys())
+    fieldnames = sorted({key for row in rows for key in row.keys()})
     output_lines: List[str] = []
 
     class ListWriter:
@@ -316,13 +352,13 @@ def render_expanded_csv(rows: Sequence[FieldLogRow]) -> str:
     writer = csv.DictWriter(ListWriter(), fieldnames=fieldnames, lineterminator="\n")
     writer.writeheader()
     for row in rows:
-        writer.writerow(row.to_expanded_dict())
+        writer.writerow(row)
 
     return "".join(output_lines)
 
 
-def render_json(rows: Sequence[FieldLogRow]) -> str:
-    return json.dumps([row.to_expanded_dict() for row in rows], indent=2)
+def render_json(rows: Sequence[dict]) -> str:
+    return json.dumps(list(rows), indent=2)
 
 
 def parse_args(argv: Sequence[str]) -> argparse.Namespace:
