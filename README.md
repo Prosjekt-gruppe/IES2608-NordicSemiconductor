@@ -1,35 +1,36 @@
 <div align="center">
   <h1>IES2608 Asset Tracker</h1>
-  <p>Prototype firmware for testing dynamic LTE-M / NTN fallback on Nordic cellular hardware.</p>
+  <p>Prototype firmware for exploring LTE-M / NTN fallback, motion-aware RSRP polling, and compact field logging on Nordic cellular hardware.</p>
   <p>
     <a href="https://www.nordicsemi.com/Products/Development-software/nRF-Connect-SDK"><img alt="nRF Connect SDK" src="https://img.shields.io/badge/nRF%20Connect%20SDK-3.2.4-00A9CE?style=flat-square&logo=nordicsemiconductor"></a>
     <a href="https://www.zephyrproject.org/"><img alt="Zephyr" src="https://img.shields.io/badge/Zephyr-RTOS-734aef?style=flat-square"></a>
     <a href="https://en.cppreference.com/w/c/language"><img alt="C" src="https://img.shields.io/badge/C-Firmware-A8B9CC?style=flat-square&logo=c"></a>
     <a href="https://www.nordicsemi.com/Products/nRF9151"><img alt="nRF9151" src="https://img.shields.io/badge/Modem-nRF9151-00A9CE?style=flat-square"></a>
     <a href="https://www.nordicsemi.com/Products/Development-hardware/Nordic-Thingy-91-X"><img alt="Thingy:91 X" src="https://img.shields.io/badge/Primary%20board-Thingy%3A91%20X-0A7EA4?style=flat-square"></a>
-    <a href="/LICENSE"><img alt="License" src="https://img.shields.io/badge/License-Nordic%205--Clause-4b5563?style=flat-square"></a>
+    <a href="https://github.com/Prosjekt-gruppe/IES2608-NordicSemiconductor"><img alt="Repository size" src="https://img.shields.io/github/repo-size/Prosjekt-gruppe/IES2608-NordicSemiconductor?style=flat-square&logo=github"></a>
+    <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/License-Nordic%205--Clause-4b5563?style=flat-square"></a>
   </p>
   <p>
     <a href="#overview">Overview</a> |
     <a href="#current-code">Current code</a> |
-    <a href="#state-flow">State flow</a> |
-    <a href="#rsrp-and-motion">RSRP and motion</a> |
+    <a href="#field-log">Field log</a> |
     <a href="#build-and-flash">Build and flash</a> |
+    <a href="#serial-logs">Serial logs</a> |
     <a href="#project-structure">Project structure</a>
   </p>
 </div>
 
 ## Overview
 
-This repository contains an asset-tracker testbench for exploring when a device should stay on LTE-M and when it should fall back toward NTN. The current direction is Thingy:91 X on the nRF9151 non-secure target, with onboard sensors used to make the LTE signal checks more context-aware.
+This repository contains an asset-tracker testbench for exploring when a device should stay on LTE-M and when it should fall back toward NTN. The active firmware lives in `app/` and currently targets Thingy:91 X on the nRF9151 non-secure target, with nRF9151 DK support for reduced-sensor builds.
 
-The active firmware application lives in `app/`. Other top-level folders contain documentation, helper material, earlier firmware/reference work, or tests.
+The current firmware is geared toward field validation rather than production hardening: observe LTE quality, use motion hints to adapt RSRP polling, switch toward NTN when LTE degrades, and retain a compact flash-backed field log that can be decoded offline.
 
-Current app version: `0.5.0-dev`
+Current app version: `0.5.1-dev`
 
 ## Repository status
 
-This is prototype firmware for field testing, not production firmware. The main focus right now is validating LTE-M loss detection, NTN fallback flow, LTE recovery probing, and sensor-assisted RSRP polling behavior.
+This is prototype firmware for field testing, not production firmware. The main focus right now is validating LTE-M loss detection, NTN fallback flow, LTE recovery probing, sensor-assisted RSRP polling behavior, and field-log capture/decoding.
 
 ## Current code
 
@@ -43,6 +44,7 @@ This is prototype firmware for field testing, not production firmware. The main 
 | LTE probe | Experimental recovery path that switches back to TN, samples RSRP, and decides whether LTE is good enough to return |
 | GNSS | GNSS state hooks are present for NTN-related flow decisions and location handoff |
 | Cloud/location | nRF Cloud and cellular location modules are present, but the current field-test focus is the RAT switching path |
+| Field log | Stores compact state-change and summary records in external flash and exposes shell commands for info, dump, and erase |
 | Sensors | Accelerometer, battery, and environmental sensor demos are active on Thingy:91 X and publish zbus samples |
 | nRF9151 DK | Supported as a secondary build target with the Thingy-only sensor demos disabled |
 
@@ -124,6 +126,9 @@ Important configuration lives in `app/Kconfig`, `app/prj.conf`, and `app/boards/
 | `CONFIG_APP_SENSOR_ACCEL_DEMO` | Builds the accelerometer module when enabled |
 | `CONFIG_APP_SENSOR_BATT_DEMO` | Builds the battery/charger module when enabled |
 | `CONFIG_APP_SENSOR_TEMP_DEMO` | Builds the environmental sensor module when enabled |
+| `CONFIG_APP_FIELD_LOG` | Enables compact field logging in external flash when supported by the board build |
+| `CONFIG_APP_FIELD_LOG_SUMMARY_INTERVAL_SEC` | Controls how often summary records are written |
+| `CONFIG_APP_FIELD_LOG_SHELL` | Enables `fieldlog info`, `fieldlog dump`, and `fieldlog erase` over the serial shell |
 | `CONFIG_APP_CORE_SEND_UDP_DATA` | Enables the UDP send test in the NTN/LTE probe flow |
 | `CONFIG_APP_CORE_SM_PROBE_TEST` | Enables the dry-run timer path into LTE probe testing |
 | `CONFIG_APP_DEBUG_*` | Optional debug stops or extra modem logging |
@@ -132,9 +137,38 @@ Board-specific behavior:
 
 | Board config | Current sensor behavior |
 | --- | --- |
-| `app/boards/thingy91x_nrf9151_ns.conf` | Enables accelerometer and battery demos; temperature demo is enabled by the Thingy:91 X Kconfig default |
+| `app/boards/thingy91x_nrf9151_ns.conf` | Enables accelerometer and battery demos, and enables the field log with shell access; temperature demo is enabled by the Thingy:91 X Kconfig default |
 | `app/boards/thingy91x_nrf9151_ns.overlay` | Enables BMI270 accelerometer and BME680 environmental sensor nodes |
-| `app/boards/nrf9151dk_nrf9151_ns.conf` | Disables accelerometer and battery demos because the DK does not have the same onboard sensors |
+| `app/boards/nrf9151dk_nrf9151_ns.conf` | Disables accelerometer and battery demos because the DK does not have the same onboard sensors, which also leaves field logging disabled by default |
+
+## Field log
+
+Thingy:91 X builds can enable a compact field log in external flash through `CONFIG_APP_FIELD_LOG=y`. The logger records state transitions together with the best known context at the time, and also emits periodic summary records for later analysis.
+
+| Record type | What it captures |
+| --- | --- |
+| State change | Sequence number, uptime, from/to state, trigger event, active and next RAT, location source, latitude/longitude/accuracy, and latest RSRP |
+| Summary | Interval length, interval and total discharge energy, LTE loss counters, switchback counters, field-log flags, and dropped-message count |
+
+When `CONFIG_APP_FIELD_LOG_SHELL=y`, the serial shell exposes these commands:
+
+| Command | Purpose |
+| --- | --- |
+| `fieldlog info` | Show storage capacity, record counts, write position, and readiness/full status |
+| `fieldlog dump` | Emit the stored records as CSV v2 for archiving or offline decoding |
+| `fieldlog erase` | Erase the configured field-log region in external flash |
+
+Decode a saved dump with the helper script in `scripts/`:
+
+```sh
+python scripts/fieldlog_decode.py fieldlog_dump.txt
+```
+
+Write an expanded CSV file:
+
+```sh
+python scripts/fieldlog_decode.py fieldlog_dump.txt --format csv --output fieldlog_decoded.csv
+```
 
 ## Tech stack
 
@@ -210,12 +244,13 @@ Useful logs to watch during field testing:
 
 | Log area | What to look for |
 | --- | --- |
-| Boot | `Firmware version: 0.5.0-dev` |
+| Boot | `Firmware version: 0.5.1-dev` |
 | LTE | Registration status and `LTE-M connected` state logs |
 | RSRP | `LTE-M RSRP: ...`, `LTE-M RSRP dropped ...`, `LTE-M RSRP weak ...`, or `LTE-M RSRP unavailable ...` |
 | Motion | `Motion state: moving`, `Motion state: still`, and movement detection logs |
 | NTN | NTN registration, PDN up/down, and modem switch logs |
 | LTE probe | Probe RSRP samples, average RSRP, and `EVT_LTE_GOOD` / `EVT_LTE_POOR` decisions |
+| Field log | `Field log started ...`, periodic summary records, and shell output from `fieldlog info` / `fieldlog dump` |
 | Sensors | Battery and environmental sample logs |
 
 ## Active application layout
@@ -229,6 +264,7 @@ app/
       cloud/               nRF Cloud connection wrapper
       common/              Shared events, app types, and zbus helpers
       core/                SMF application state machine
+      field_log/           Compact field logger and shell export helpers
       gnss/                GNSS service hooks
       location/            LTE cellular location service wrapper
       lte/                 LTE-M connection service
@@ -247,9 +283,9 @@ app/
 ```text
 app/        Active firmware application
 docs/       Architecture notes, modem commands, diagrams, and west setup notes
-Firmware/   Earlier firmware/reference material
-scripts/    Helper scripts and script notes
-tests/      Test and scratch work
+Firmware/   Earlier firmware and AGNSS reference material
+scripts/    Helper utilities, including the field-log decoder
+tests/      Test scaffolding, module experiments, and on-target work
 west.yml    Workspace manifest
 ```
 
