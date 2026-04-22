@@ -224,6 +224,13 @@ static void boot_entry(void *obj)
     }
 
 
+    err = ntn_service_init();
+    if (err){
+        LOG_ERR("ntn_service_init err=%d", err); 
+        return; 
+    }
+
+
     /* init timers */
     k_timer_init(&ctx->backoff_timer, backoff_timer_handler, NULL);
     k_timer_init(&ctx->ntn_timer, ntn_timer_handler, NULL);

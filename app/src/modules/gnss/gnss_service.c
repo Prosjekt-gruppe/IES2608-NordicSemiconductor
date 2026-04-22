@@ -140,6 +140,10 @@ static void gnss_pvt_work_handler(struct k_work *work)
     int64_t ttff_ms = -1;
     int err = nrf_modem_gnss_read(&pvt_data, sizeof(pvt_data), NRF_MODEM_GNSS_DATA_PVT);
 
+    //err = app_zbus_publish_gnss_status(APP_GNSS_STATE_FIX, 0, ttff_ms,
+    //                                   pvt_data.latitude, pvt_data.longitude,
+    //  
+
     if (err) {
         LOG_ERR("nrf_modem_gnss_read failed, err=%d", err);
         (void)handle_error(err);
