@@ -17,14 +17,8 @@
 #define MOSI D11
 
 
-
 //Serial config
 #define BAUDRATE 115200
-
-
-//GPIO definitions
-#define BILED 2 //Buildt in led
-
 
 static void ModemSleep(){
     esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_ALL);

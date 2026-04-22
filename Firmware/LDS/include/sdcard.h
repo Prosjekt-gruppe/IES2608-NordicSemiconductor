@@ -174,3 +174,28 @@ void testFileIO(fs::FS &fs, const char * path){
   Serial.printf("%u bytes written for %u ms\n", 2048 * 512, end);
   file.close();
 }
+
+
+String readLastLines(const char *path, int n) {
+  File file = SD.open(path);
+  if (!file) return "";
+
+  String lines[10]; // max 10 linjer
+  int count = 0;
+
+  while (file.available()) {
+    String line = file.readStringUntil('\n');
+    lines[count % n] = line;
+    count++;
+  }
+  file.close();
+
+  String result = "";
+  int start = max(0, count - n);
+
+  for (int i = start; i < count; i++) {
+    result += lines[i % n] + "\n";
+  }
+
+  return result;
+}
