@@ -15,6 +15,11 @@ enum rat {
     RAT_NTN
 };
 
+struct retry_state {
+    uint8_t ltem_attempts;
+    uint8_t ntn_attempts;
+};
+
 
 enum app_state {
     STATE_BOOT,
@@ -92,6 +97,8 @@ struct app_ctx {
     /* rat overview */
     enum rat active_rat;
     enum rat next_rat;
+
+    struct retry_state retry;
     
     /* ltem signal strength*/
     int rsrp_dbm;

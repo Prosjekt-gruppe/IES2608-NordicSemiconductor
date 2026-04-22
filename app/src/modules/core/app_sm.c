@@ -166,6 +166,26 @@ static const struct smf_state states[] = {
     ),
 };
 
+static void retry_reset(struct app_ctx *ctx, enum rat rat)
+{
+    if (rat == RAT_LTEM) {
+        ctx->retry.ltem_attempts = 0;
+    } else if (rat == RAT_NTN) {
+        ctx->retry.ntn_attempts = 0;
+    }
+}
+
+static uint8_t retry_inc(struct app_ctx *ctx, enum rat rat)
+{
+    if (rat == RAT_LTEM) {
+        return ++ctx->retry.ltem_attempts;
+    } else if (rat == RAT_NTN) {
+        return ++ctx->retry.ntn_attempts;
+    }
+
+    return 0;
+}
+
 static void transition_to_state(struct app_ctx *ctx, enum app_state next_state)
 {
 #if defined(CONFIG_APP_FIELD_LOG)
@@ -725,6 +745,9 @@ static enum smf_state_result ntn_connecting_run(void *obj)
     switch (ctx->ev.type) {
     case EVT_REG_OK:
         LOG_INF("ntn registered ok");
+
+        /* connection success -> reset retry attempt-counter */
+        retry_reset(ctx, RAT_NTN);
         
         ctx->active_rat = RAT_NTN;
         transition_to_state(ctx, STATE_NTN_CONNECTED);
@@ -732,7 +755,9 @@ static enum smf_state_result ntn_connecting_run(void *obj)
     
     case EVT_PDN_UP:
         LOG_WRN("PDN_UP in NTN_CONNECTING (unexpected order)");
+        retry_reset(ctx, RAT_NTN);
         ctx->pdn_up = true;
+        ctx->active_rat = RAT_NTN;
         transition_to_state(ctx, STATE_NTN_CONNECTED);
         return SMF_EVENT_HANDLED;
 
@@ -740,8 +765,16 @@ static enum smf_state_result ntn_connecting_run(void *obj)
     case EVT_PDN_DOWN:
     case EVT_TIMEOUT:
         LOG_INF("ntn connect failed/timeout");
-
         ctx->pdn_up=false;
+
+        /* increment NTN attempt */
+        uint8_t attempts = retry_inc(ctx, RAT_NTN);
+
+        if (attempts >= CONFIG_APP_MAX_NTN_RETRIES) {
+            LOG_WRN("NTN retries exhausted -> trying LTE-M connection...");
+            retry_reset(ctx, RAT_NTN);
+            ctx->next_rat = RAT_LTEM;
+        }
         
         transition_to_state(ctx, STATE_BACKOFF);
         return SMF_EVENT_HANDLED;
