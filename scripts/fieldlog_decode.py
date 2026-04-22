@@ -126,6 +126,8 @@ def parse_legacy_row(row_text: str) -> dict:
 
 def parse_v2_row(row_text: str) -> dict:
     parts = next(csv.reader([row_text]))
+    if len(parts) == 21 and parts and parts[0].strip() == "state":
+        parts.append("")
     if len(parts) != 22:
         raise ValueError(f"expected 22 columns, got {len(parts)}: {row_text!r}")
 

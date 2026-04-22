@@ -1240,7 +1240,7 @@ static void shell_print_state_record(const struct shell *shell,
 	}
 
 	shell_print(shell,
-		    "state,%u,%u,%s,%s,%s,%s,%s,%s,%s,%s,%s,%d,,,,,,,,",
+		    "state,%u,%u,%s,%s,%s,%s,%s,%s,%s,%s,%s,%d,,,,,,,,,",
 		    record->header.sequence,
 		    record->header.uptime_s,
 		    field_log_state_name(payload->from_state),
