@@ -16,7 +16,12 @@
 #include "location_service.h"
 #include "cloud_service.h"
 
+#if defined(CONFIG_APP_FIELD_LOG)
+#include "field_log.h"
+#endif
 
+
+#include <limits.h>
 #include <modem/nrf_modem_lib.h>
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
@@ -158,6 +163,15 @@ static const struct smf_state states[] = {
     ),
 };
 
+static void transition_to_state(struct app_ctx *ctx, enum app_state next_state)
+{
+#if defined(CONFIG_APP_FIELD_LOG)
+    field_log_note_state_change(ctx->state, next_state, ctx->ev.type, ctx);
+#endif
+    ctx->state = next_state;
+    smf_set_state(SMF_CTX(ctx), &states[next_state]);
+}
+
 static void dispatch_app_event(struct app_ctx *ctx, const struct app_event *ev)
 {
     ctx->ev = *ev;
@@ -229,7 +243,7 @@ static enum smf_state_result boot_run(void *obj)
         if (IS_ENABLED(CONFIG_APP_DEBUG_BOOT)) {
             LOG_INF("DEBUG: Halting in STATE_BOOT after initialization");
         } else {
-            smf_set_state(SMF_CTX(ctx), &states[STATE_LTEM_CONNECTING]);
+            transition_to_state(ctx, STATE_LTEM_CONNECTING);
         }
     }
     return SMF_EVENT_HANDLED;
@@ -261,9 +275,9 @@ static enum smf_state_result ltem_connecting_run(void *obj)
 
             if (IS_ENABLED(CONFIG_APP_DEBUG_LTE_CONNECTING)){
                 LOG_INF("Debug_ Halting after LTE registration");
-                smf_set_state(SMF_CTX(ctx), &states[STATE_IDLE]);
+                transition_to_state(ctx, STATE_IDLE);
             } else {
-                smf_set_state(SMF_CTX(ctx), &states[STATE_LTEM_CONNECTED]);
+                transition_to_state(ctx, STATE_LTEM_CONNECTED);
             }
 
             return SMF_EVENT_HANDLED;
@@ -271,7 +285,7 @@ static enum smf_state_result ltem_connecting_run(void *obj)
         case EVT_REG_FAIL:
             ctx->next_rat = RAT_NTN;
             /* go to backoff state */
-            smf_set_state(SMF_CTX(ctx), &states[STATE_BACKOFF]);
+            transition_to_state(ctx, STATE_BACKOFF);
             return SMF_EVENT_HANDLED;
 
         default:
@@ -339,7 +353,7 @@ static void ltem_connected_entry(void *obj)
 
 #if defined(CONFIG_APP_DEBUG_LTE_CONNECTING)
     LOG_INF("STATE_LTEM_CONNECTED --> STATE_CLOUD_CONNECTING");
-    smf_set_state(SMF_CTX(ctx), &states[STATE_CLOUD_CONNECTING]);
+    transition_to_state(ctx, STATE_CLOUD_CONNECTING);
 #endif
 
     LOG_INF("ltem_connected_entry ok");
@@ -360,7 +374,7 @@ static enum smf_state_result ltem_connected_run(void *obj)
         LOG_WRN("LTE poor, consider switching RAT");
         ctx->next_rat = RAT_NTN;
         /* go to backoff */
-        smf_set_state(SMF_CTX(ctx), &states[STATE_BACKOFF]);
+        transition_to_state(ctx, STATE_BACKOFF);
         return SMF_EVENT_HANDLED;
     
 /* force EVT_LTE_POOR (usually should be disabled) */
@@ -368,7 +382,7 @@ static enum smf_state_result ltem_connected_run(void *obj)
     case EVT_TIMEOUT:
         ctx->next_rat = RAT_NTN;
         LOG_INF("manual force test going to STATE_BACKOFF");
-        smf_set_state(SMF_CTX(ctx), &states[STATE_BACKOFF]);
+        transition_to_state(ctx, STATE_BACKOFF);
         return SMF_EVENT_HANDLED;
 #endif
 
@@ -431,9 +445,9 @@ static enum smf_state_result cloud_connecting_run(void *obj)
 
             if (IS_ENABLED(CONFIG_APP_DEBUG_CLOUD_CONNECTING)){
                 LOG_INF("DEBUG: Halting after cloud connect success"); 
-                smf_set_state(SMF_CTX(ctx), &states[STATE_IDLE]);
+                transition_to_state(ctx, STATE_IDLE);
             } else {
-                smf_set_state(SMF_CTX(ctx), &states[STATE_LTE_LOCATION]);
+                transition_to_state(ctx, STATE_LTE_LOCATION);
             }
             return SMF_EVENT_HANDLED;
 
@@ -443,9 +457,9 @@ static enum smf_state_result cloud_connecting_run(void *obj)
 
             if (IS_ENABLED(CONFIG_APP_DEBUG_CLOUD_CONNECTING)){
                 LOG_INF("DEBUG: Halting after cloud connect failure");
-                smf_set_state(SMF_CTX(ctx), &states[STATE_IDLE]);
+                transition_to_state(ctx, STATE_IDLE);
             } else {
-                smf_set_state(SMF_CTX(ctx), &states[STATE_IDLE]);
+                transition_to_state(ctx, STATE_IDLE);
             }
             return SMF_EVENT_HANDLED;
 
@@ -454,9 +468,9 @@ static enum smf_state_result cloud_connecting_run(void *obj)
             LOG_WRN("Cloud disconnected while connecting");
             if(IS_ENABLED(CONFIG_APP_DEBUG_CLOUD_CONNECTING)){
                 LOG_INF("DEBUG: Halting after cloud disconnect");
-                smf_set_state(SMF_CTX(ctx), &states[STATE_IDLE]);
+                transition_to_state(ctx, STATE_IDLE);
             } else {
-                smf_set_state(SMF_CTX(ctx), &states[STATE_IDLE]);
+                transition_to_state(ctx, STATE_IDLE);
             }
             return SMF_EVENT_HANDLED;
         
@@ -501,10 +515,10 @@ static enum smf_state_result lte_location_run(void *obj)
             
             if (IS_ENABLED(CONFIG_APP_DEBUG_LTE_LOCATION)){
                 LOG_INF("DEBUG: Halting after LTE location success"); 
-                smf_set_state(SMF_CTX(ctx), &states[STATE_IDLE]);
+                transition_to_state(ctx, STATE_IDLE);
 
             }else {
-                smf_set_state(SMF_CTX(ctx), &states[STATE_IDLE]);
+                transition_to_state(ctx, STATE_IDLE);
             }
             return SMF_EVENT_HANDLED;
 
@@ -513,9 +527,9 @@ static enum smf_state_result lte_location_run(void *obj)
 
             if (IS_ENABLED(CONFIG_APP_DEBUG_LTE_LOCATION)){
                 LOG_INF("DEBUG: HALTING after LTE location failure");
-                smf_set_state(SMF_CTX(ctx), &states[STATE_IDLE]);
+                transition_to_state(ctx, STATE_IDLE);
             }else {
-                smf_set_state(SMF_CTX(ctx), &states[STATE_IDLE]);
+                transition_to_state(ctx, STATE_IDLE);
             }
             return SMF_EVENT_HANDLED;
 
@@ -524,9 +538,9 @@ static enum smf_state_result lte_location_run(void *obj)
 
             if(IS_ENABLED(CONFIG_APP_DEBUG_LTE_LOCATION)){
                 LOG_INF("DEBUG: Halting after LTE location timeout");
-                smf_set_state(SMF_CTX(ctx), &states[STATE_IDLE]);
+                transition_to_state(ctx, STATE_IDLE);
             } else {
-                smf_set_state(SMF_CTX(ctx), &states[STATE_IDLE]);
+                transition_to_state(ctx, STATE_IDLE);
             }
             return SMF_EVENT_HANDLED;
 
@@ -589,7 +603,7 @@ static enum smf_state_result gnss_acquire_run(void *obj)
                 (double)ctx->last_pvt.longitude);
 
         (void)gnss_service_stop();
-        smf_set_state(SMF_CTX(ctx), &states[STATE_NTN_CONNECTING]);
+        transition_to_state(ctx, STATE_NTN_CONNECTING);
         return SMF_EVENT_HANDLED;
     
 
@@ -606,7 +620,7 @@ static enum smf_state_result gnss_acquire_run(void *obj)
 
         LOG_INF("Using fallback GNSS position (Trondheim)");
 
-        smf_set_state(SMF_CTX(ctx), &states[STATE_NTN_CONNECTING]);
+        transition_to_state(ctx, STATE_NTN_CONNECTING);
         return SMF_EVENT_HANDLED;
 
     default:
@@ -650,13 +664,13 @@ static enum smf_state_result ntn_connecting_run(void *obj)
         LOG_INF("ntn registered ok");
         
         ctx->active_rat = RAT_NTN;
-        smf_set_state(SMF_CTX(ctx), &states[STATE_NTN_CONNECTED]);
+        transition_to_state(ctx, STATE_NTN_CONNECTED);
         return SMF_EVENT_HANDLED;
     
     case EVT_PDN_UP:
         LOG_WRN("PDN_UP in NTN_CONNECTING (unexpected order)");
         ctx->pdn_up = true;
-        smf_set_state(SMF_CTX(ctx), &states[STATE_NTN_CONNECTED]);
+        transition_to_state(ctx, STATE_NTN_CONNECTED);
         return SMF_EVENT_HANDLED;
 
     case EVT_REG_FAIL:
@@ -666,7 +680,7 @@ static enum smf_state_result ntn_connecting_run(void *obj)
 
         ctx->pdn_up=false;
         
-        smf_set_state(SMF_CTX(ctx), &states[STATE_BACKOFF]);
+        transition_to_state(ctx, STATE_BACKOFF);
         return SMF_EVENT_HANDLED;
 
     default:
@@ -717,7 +731,7 @@ static enum smf_state_result ntn_connected_run(void *obj)
     switch (ctx->ev.type) {
     case EVT_TIMEOUT:
         LOG_INF("ntn timeout -> entering lte-probe");
-        smf_set_state(SMF_CTX(ctx), &states[STATE_LTE_PROBE]);
+        transition_to_state(ctx, STATE_LTE_PROBE);
         return SMF_EVENT_HANDLED;
 
     case EVT_PDN_UP:
@@ -736,7 +750,7 @@ static enum smf_state_result ntn_connected_run(void *obj)
         ctx->pdn_up = false;
         ctx->next_rat = RAT_LTEM;
         LOG_INF("NTN connection lost/failed");
-        smf_set_state(SMF_CTX(ctx), &states[STATE_BACKOFF]);
+        transition_to_state(ctx, STATE_BACKOFF);
         return SMF_EVENT_HANDLED;
 
     default:
@@ -809,7 +823,7 @@ static void lte_probe_entry(void *obj)
     if (err) {
         LOG_INF("switch to tn lte probe fault");
         lte_service_set_probe_pending(false);
-        smf_set_state(SMF_CTX(ctx), &states[STATE_NTN_CONNECTED]);
+        transition_to_state(ctx, STATE_NTN_CONNECTED);
         return;
     }
 
@@ -832,7 +846,7 @@ static enum smf_state_result lte_probe_run(void *obj)
         /* return to NTN */
         modem_service_switch_to_ntn();
 
-        smf_set_state(SMF_CTX(ctx), &states[STATE_NTN_CONNECTED]);
+        transition_to_state(ctx, STATE_NTN_CONNECTED);
         return SMF_EVENT_HANDLED;
 
     case EVT_LTE_GOOD:
@@ -845,7 +859,7 @@ static enum smf_state_result lte_probe_run(void *obj)
             LOG_ERR("UDP test failed: %d", err);
             
             modem_service_switch_to_ntn();
-            smf_set_state(SMF_CTX(ctx), &states[STATE_NTN_CONNECTED]);
+            transition_to_state(ctx, STATE_NTN_CONNECTED);
             return SMF_EVENT_HANDLED;
         }
     
@@ -854,7 +868,7 @@ static enum smf_state_result lte_probe_run(void *obj)
     
         /* should probably go to LTEM_CONNECTING/CONNECTED but for this test its ok */
         ctx->next_rat = RAT_LTEM;
-        smf_set_state(SMF_CTX(ctx), &states[STATE_LTEM_CONNECTED]);
+        transition_to_state(ctx, STATE_LTEM_CONNECTED);
         return SMF_EVENT_HANDLED;
 
     case EVT_TN_READY_FOR_PROBE:
@@ -865,7 +879,7 @@ static enum smf_state_result lte_probe_run(void *obj)
         if (err < 0) {
             LOG_ERR("rsrp_service_start_probe failed: %d", err);
             modem_service_switch_to_ntn();
-            smf_set_state(SMF_CTX(ctx), &states[STATE_NTN_CONNECTED]);
+            transition_to_state(ctx, STATE_NTN_CONNECTED);
         }
 
         return SMF_EVENT_HANDLED;
@@ -915,7 +929,7 @@ static enum smf_state_result backoff_run(void *obj)
     case EVT_TIMEOUT:
         if (ctx->next_rat != RAT_NTN) {
             LOG_INF("Retry LTE connect");
-            smf_set_state(SMF_CTX(ctx), &states[STATE_LTEM_CONNECTING]);
+            transition_to_state(ctx, STATE_LTEM_CONNECTING);
             return SMF_EVENT_HANDLED;
         }
 
@@ -923,11 +937,11 @@ static enum smf_state_result backoff_run(void *obj)
 
         if (!ctx->have_fix) {
             LOG_INF("No GNSS fix -> trying to acquire fix");
-            smf_set_state(SMF_CTX(ctx), &states[STATE_GNSS_ACQUIRE]);
+            transition_to_state(ctx, STATE_GNSS_ACQUIRE);
             return SMF_EVENT_HANDLED;
         }
 
-        smf_set_state(SMF_CTX(ctx), &states[STATE_NTN_CONNECTING]);
+        transition_to_state(ctx, STATE_NTN_CONNECTING);
         return SMF_EVENT_HANDLED;
 
     default:
@@ -960,6 +974,7 @@ static void smf_thread(void *p1, void *p2, void *p3)
     struct app_ctx *ctx = p1;
 
     smf_set_initial(SMF_CTX(ctx), &states[STATE_BOOT]);
+    ctx->state = STATE_BOOT;
 
     while (1) {
         const struct zbus_channel *chan;
@@ -990,6 +1005,8 @@ static void smf_thread(void *p1, void *p2, void *p3)
 
 int app_sm_start(struct app_ctx *ctx)
 {
+    ctx->state = STATE_BOOT;
+    ctx->rsrp_dbm = INT32_MIN;
     k_thread_create(&smf_thread_data, smf_stack, SMF_STACK_SIZE,
                     smf_thread, ctx, NULL, NULL,
                     SMF_PRIORITY, 0, K_NO_WAIT);

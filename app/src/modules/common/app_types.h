@@ -68,6 +68,7 @@ struct app_event {
 
 struct app_ctx {
     struct smf_ctx ctx;
+    enum app_state state;
     
     /* rat overview */
     enum rat active_rat;

@@ -8,6 +8,10 @@
 
 #include "app_events.h"
 
+#if defined(CONFIG_APP_FIELD_LOG)
+#include "field_log.h"
+#endif
+
 #include <stdbool.h>
 #include <nrf_modem_gnss.h>
 #include <zephyr/kernel.h>
@@ -127,6 +131,14 @@ static void gnss_pvt_work_handler(struct k_work *work)
     }
 
     log_fix_data(&pvt_data);
+
+#if defined(CONFIG_APP_FIELD_LOG)
+    field_log_note_location(FIELD_LOG_LOCATION_GNSS,
+                            pvt_data.latitude,
+                            pvt_data.longitude,
+                            pvt_data.accuracy);
+#endif
+
     //err = app_zbus_publish_gnss_status(APP_GNSS_STATE_FIX, 0, ttff_ms,
     //                                   pvt_data.latitude, pvt_data.longitude,
     //                                   pvt_data.altitude, satellites);

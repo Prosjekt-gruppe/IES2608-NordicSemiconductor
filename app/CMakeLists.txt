@@ -26,6 +26,7 @@ target_sources(app PRIVATE src/main.c
 target_include_directories(app PRIVATE
     src/modules/common
     src/modules/core
+    src/modules/field_log
     src/modules/gnss
     src/modules/lte
     src/modules/modem
@@ -46,4 +47,8 @@ endif()
 
 if(CONFIG_APP_SENSOR_TEMP_DEMO)
     target_sources(app PRIVATE src/modules/sensors/temp.c)
+endif()
+
+if(CONFIG_APP_FIELD_LOG)
+    target_sources(app PRIVATE src/modules/field_log/field_log.c)
 endif()

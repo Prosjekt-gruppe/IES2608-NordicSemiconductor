@@ -6,6 +6,10 @@
 
 #include "app_zbus.h"
 
+#if defined(CONFIG_APP_FIELD_LOG)
+#include "field_log.h"
+#endif
+
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
 
@@ -132,6 +136,10 @@ int app_zbus_publish_battery_sample(int64_t voltage_mv, int64_t current_ma,
 		.charger_error = charger_error,
 		.vbus_present = vbus_present,
 	};
+
+#if defined(CONFIG_APP_FIELD_LOG)
+	field_log_note_battery_sample(&msg);
+#endif
 
 	return publish_status(&battery_sample_chan, &msg);
 }
