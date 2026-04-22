@@ -51,6 +51,9 @@ const char *app_evt_name(enum app_evt_type type)
 
     case EVT_PDN_UP: return "EVT_PDN_UP";
     case EVT_PDN_DOWN: return "EVT_PDN_DOWN";
+    case EVT_MODEM_SWITCH_FAIL: return "EVT_MODEM_SWITCH_FAIL";
+    case EVT_MODEM_SWITCH_CMD_OK: return "EVT_MODEM_SWITCH_CMD_OK";
+    case EVT_TN_READY_FOR_PROBE: return "EVT_TN_READY_FOR_PROBE";
     default: return "EVT_UNKNOWN";
     }
 }

@@ -23,6 +23,10 @@
 #include "app_events.h"
 #include "app_sm.h"
 
+#if defined(CONFIG_APP_FIELD_LOG)
+#include "field_log.h"
+#endif
+
 
 #if defined(CONFIG_APP_SENSOR_ACCEL_DEMO)
 #include "accel.h"
@@ -37,6 +41,14 @@ LOG_MODULE_REGISTER(app, LOG_LEVEL_INF);
 int main(void)
 {
     static struct app_ctx ctx;
+
+#if defined(CONFIG_APP_FIELD_LOG)
+    int err = field_log_start();
+
+    if (err) {
+        LOG_WRN("field_log_start failed: %d", err);
+    }
+#endif
 
     app_sm_start(&ctx);
 
