@@ -11,7 +11,6 @@ uint32_t trackingcounter = 0;
 
 
 //I2c data variables
-
 typedef struct {
   float temperature;
   float humidity;
@@ -99,7 +98,7 @@ void requestEvent() {
 }
 
 
-
+//Storing task
 void SDTask(void *pvParameters) {
   sensor_data_t s;
   ppk_data_t p;
