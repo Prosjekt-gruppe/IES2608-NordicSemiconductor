@@ -47,7 +47,7 @@ LOG_MODULE_REGISTER(field_log, LOG_LEVEL_INF);
 #define FIELD_LOG_SUMMARY_FLAG_STORAGE_DISABLED BIT(2)
 
 #define FIELD_LOG_CSV_HEADER                                                        \
-	"type,seq,uptime_s,from_state,to_state,reason,active_rat,next_rat,"        \
+	"type,session,seq,uptime_s,from_state,to_state,reason,active_rat,next_rat," \
 	"location_source,latitude,longitude,accuracy_m,last_rsrp_dbm,"             \
 	"interval_s,power_interval_uwh,power_total_uwh,lte_losses_interval,"       \
 	"lte_losses_total,switchbacks_interval,switchbacks_total,flags,"           \
@@ -1219,6 +1219,7 @@ static int cmd_fieldlog_info(const struct shell *shell, size_t argc, char **argv
 }
 
 static void shell_print_state_record(const struct shell *shell,
+				     uint16_t session_id,
 				     const struct field_log_record *record)
 {
 	char latitude[20] = "";
@@ -1240,7 +1241,8 @@ static void shell_print_state_record(const struct shell *shell,
 	}
 
 	shell_print(shell,
-		    "state,%u,%u,%s,%s,%s,%s,%s,%s,%s,%s,%s,%d,,,,,,,,,",
+		    "state,%u,%u,%u,%s,%s,%s,%s,%s,%s,%s,%s,%s,%d,,,,,,,,,",
+		    session_id,
 		    record->header.sequence,
 		    record->header.uptime_s,
 		    field_log_state_name(payload->from_state),
@@ -1256,12 +1258,14 @@ static void shell_print_state_record(const struct shell *shell,
 }
 
 static void shell_print_summary_record(const struct shell *shell,
+				       uint16_t session_id,
 				       const struct field_log_record *record)
 {
 	const struct field_log_summary_record_payload *payload = &record->payload.summary;
 
 	shell_print(shell,
-		    "summary,%u,%u,,,,,,,,,,,%u,%u,%u,%u,%u,%u,%u,0x%02x,%u",
+		    "summary,%u,%u,%u,,,,,,,,,,,%u,%u,%u,%u,%u,%u,%u,0x%02x,%u",
+		    session_id,
 		    record->header.sequence,
 		    record->header.uptime_s,
 		    payload->interval_s,
@@ -1280,6 +1284,9 @@ static int cmd_fieldlog_dump(const struct shell *shell, size_t argc, char **argv
 	struct field_log_record record;
 	enum field_log_slot_state slot_state;
 	uint32_t count = 0;
+	uint16_t session_id = 1U;
+	uint32_t previous_uptime_s = 0U;
+	bool have_previous_uptime = false;
 	int err = 0;
 
 	ARG_UNUSED(argc);
@@ -1314,12 +1321,19 @@ static int cmd_fieldlog_dump(const struct shell *shell, size_t argc, char **argv
 			break;
 		}
 
-		if (record.header.type == FIELD_LOG_RECORD_TYPE_STATE_CHANGE) {
-			shell_print_state_record(shell, &record);
-		} else {
-			shell_print_summary_record(shell, &record);
+		if (have_previous_uptime && record.header.uptime_s < previous_uptime_s &&
+		    session_id < UINT16_MAX) {
+			session_id++;
 		}
 
+		if (record.header.type == FIELD_LOG_RECORD_TYPE_STATE_CHANGE) {
+			shell_print_state_record(shell, session_id, &record);
+		} else {
+			shell_print_summary_record(shell, session_id, &record);
+		}
+
+		previous_uptime_s = record.header.uptime_s;
+		have_previous_uptime = true;
 		count++;
 	}
 

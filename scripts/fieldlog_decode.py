@@ -101,6 +101,7 @@ def parse_legacy_row(row_text: str) -> dict:
 
     return {
         "type": "battery_v1",
+        "session": None,
         "seq": seq,
         "uptime_s": uptime_s,
         "uptime_hms": seconds_to_hms(uptime_s),
@@ -128,51 +129,60 @@ def parse_v2_row(row_text: str) -> dict:
     parts = next(csv.reader([row_text]))
     if len(parts) == 21 and parts and parts[0].strip() == "state":
         parts.append("")
-    if len(parts) != 22:
+    if len(parts) not in (22, 23):
         raise ValueError(f"expected 22 columns, got {len(parts)}: {row_text!r}")
 
     row_type = parts[0].strip()
-    seq = int(parts[1])
-    uptime_s = int(parts[2])
+    if len(parts) == 23:
+        session = int(parts[1])
+        base = 1
+    else:
+        session = None
+        base = 0
+
+    seq = int(parts[1 + base])
+    uptime_s = int(parts[2 + base])
 
     if row_type == "state":
-        accuracy_m = parse_optional_int(parts[11])
+        accuracy_m = parse_optional_int(parts[11 + base])
         return {
             "type": "state",
+            "session": session,
             "seq": seq,
             "uptime_s": uptime_s,
             "uptime_hms": seconds_to_hms(uptime_s),
-            "from_state": parts[3].strip(),
-            "to_state": parts[4].strip(),
-            "reason": parts[5].strip(),
-            "active_rat": parts[6].strip(),
-            "next_rat": parts[7].strip(),
-            "location_source": parts[8].strip(),
-            "latitude": parts[9].strip(),
-            "longitude": parts[10].strip(),
+            "from_state": parts[3 + base].strip(),
+            "to_state": parts[4 + base].strip(),
+            "reason": parts[5 + base].strip(),
+            "active_rat": parts[6 + base].strip(),
+            "next_rat": parts[7 + base].strip(),
+            "location_source": parts[8 + base].strip(),
+            "latitude": parts[9 + base].strip(),
+            "longitude": parts[10 + base].strip(),
             "accuracy_m": accuracy_m,
-            "last_rsrp_dbm": int(parts[12]) if parts[12].strip() else None,
+            "last_rsrp_dbm": int(parts[12 + base]) if parts[12 + base].strip() else None,
         }
 
     if row_type == "summary":
-        flags_text = decode_v2_flags(int(parts[20], 16))
+        flags_text = decode_v2_flags(int(parts[20 + base], 16))
         return {
             "type": "summary",
+            "session": session,
             "seq": seq,
             "uptime_s": uptime_s,
             "uptime_hms": seconds_to_hms(uptime_s),
-            "interval_s": int(parts[13]),
-            "interval_hms": seconds_to_hms(int(parts[13])),
-            "power_interval_uwh": int(parts[14]),
-            "power_total_uwh": int(parts[15]),
-            "lte_losses_interval": int(parts[16]),
-            "lte_losses_total": int(parts[17]),
-            "switchbacks_interval": int(parts[18]),
-            "switchbacks_total": int(parts[19]),
-            "flags_raw": int(parts[20], 16),
-            "flags_hex": parts[20].strip(),
+            "interval_s": int(parts[13 + base]),
+            "interval_hms": seconds_to_hms(int(parts[13 + base])),
+            "power_interval_uwh": int(parts[14 + base]),
+            "power_total_uwh": int(parts[15 + base]),
+            "lte_losses_interval": int(parts[16 + base]),
+            "lte_losses_total": int(parts[17 + base]),
+            "switchbacks_interval": int(parts[18 + base]),
+            "switchbacks_total": int(parts[19 + base]),
+            "flags_raw": int(parts[20 + base], 16),
+            "flags_hex": parts[20 + base].strip(),
             "flags_text": flags_text,
-            "dropped_messages": int(parts[21]),
+            "dropped_messages": int(parts[21 + base]),
         }
 
     raise ValueError(f"unknown row type: {row_type!r}")
@@ -211,6 +221,23 @@ def parse_lines(lines: Iterable[str]) -> List[dict]:
             rows.append(parse_legacy_row(row_text))
 
     rows.sort(key=lambda row: row["seq"])
+
+    current_session: int | None = None
+    previous_uptime_s: int | None = None
+    for row in rows:
+        if row.get("session") is not None:
+            current_session = row["session"]
+            previous_uptime_s = row["uptime_s"]
+            continue
+
+        if current_session is None:
+            current_session = 1
+        elif previous_uptime_s is not None and row["uptime_s"] < previous_uptime_s:
+            current_session += 1
+
+        row["session"] = current_session
+        previous_uptime_s = row["uptime_s"]
+
     return rows
 
 
@@ -231,6 +258,7 @@ def build_summary(rows: Sequence[dict]) -> List[tuple[str, str]]:
 
     summary: List[tuple[str, str]] = [
         ("records", str(len(rows))),
+        ("sessions", str(max(row["session"] for row in rows))),
         ("first_seq", str(rows[0]["seq"])),
         ("last_seq", str(rows[-1]["seq"])),
         ("uptime_start", rows[0]["uptime_hms"]),
@@ -279,7 +307,7 @@ def render_summary(summary: Sequence[tuple[str, str]]) -> str:
 
 
 def render_table(rows: Sequence[dict]) -> str:
-    headers = ["seq", "uptime", "type", "details"]
+    headers = ["session", "seq", "uptime", "type", "details"]
     table_rows: List[List[str]] = []
 
     for row in rows:
@@ -318,6 +346,7 @@ def render_table(rows: Sequence[dict]) -> str:
 
         table_rows.append(
             [
+                str(row["session"]),
                 str(row["seq"]),
                 row["uptime_hms"],
                 row["type"],
