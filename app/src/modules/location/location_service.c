@@ -47,14 +47,21 @@ static int publish_lte_loc_timeout(void)
 
 static void location_event_handler(const struct location_event_data *event_data)
 {
-    int err; 
+    int err;
 
     switch (event_data->id){
-        case LOCATION_EVT_LOCATION:
-            LOG_INF("LTE location success: lat=%f lon=%f acc=%f m",
+    case LOCATION_EVT_LOCATION:
+        LOG_INF("LTE location success: lat=%f lon=%f acc=%f m",
             (double)event_data->location.latitude,
             (double)event_data->location.longitude,
             (double)event_data->location.accuracy);
+        err = publish_lte_loc_ok(&event_data->location); 
+        LOG_INF("Published EVT_lOC_OK err=%d", err);
+
+        if (event_data == NULL) {
+            LOG_ERR("location_event_handler: NULL event_data");
+            return;
+        }
 
 #if defined(CONFIG_APP_FIELD_LOG)
         field_log_note_location(FIELD_LOG_LOCATION_LTE,
@@ -63,27 +70,25 @@ static void location_event_handler(const struct location_event_data *event_data)
                                 event_data->location.accuracy);
 #endif
 
-        err = publish_lte_loc_ok(&event_data->location); 
-        LOG_INF("Published EVT_lOC_OK err=%d", err);
+        LOG_INF("location_event_handler entered, id=%d", event_data->id);
+
+    case LOCATION_EVT_TIMEOUT:
+        LOG_WRN("LTE location timeout");
+
+        err = publish_lte_loc_timeout();
+        LOG_INF("Published EVT_LTE_LOC_TIMEOUT err=%d", err);
         break;
 
-        case LOCATION_EVT_TIMEOUT:
-            LOG_WRN("LTE location timeout");
+    case LOCATION_EVT_ERROR:
+        LOG_ERR("LTE location failed");
 
-            err = publish_lte_loc_timeout();
-            LOG_INF("Published EVT_LTE_LOC_TIMEOUT err=%d", err); 
-            break;
-        
-        case LOCATION_EVT_ERROR:
-            LOG_ERR("LTE location failed");
+        err = publish_lte_loc_fail();
+        LOG_INF("Published EVT_LTE_LOC_FAIL err=%d", err);
+        break;
 
-            err = publish_lte_loc_fail();
-            LOG_INF("Published EVT_LTE_LOC_FAIL err=%d", err);
-            break;
-        
-        default:
-            LOG_WRN("Unhandled location event id=%d", event_data->id); 
-            break;
+    default:
+        LOG_WRN("Unhandled location event id=%d", event_data->id);
+        break;
     }
 }
 
@@ -110,13 +115,17 @@ int location_service_init(void)
 int location_service_start_lte_location(void)
 {
     int err;
-    struct location_config config;
-    enum location_method methods[] = { LOCATION_METHOD_CELLULAR };
+    static struct location_config config;
+    static enum location_method methods[] = { LOCATION_METHOD_CELLULAR };
 
     if (!cloud_service_is_connected()){
         LOG_ERR("Cannot start cloud cellular location: cloud not connected");
         return -ENOTCONN; 
     }
+
+    memset(&config, 0, sizeof(config));
+
+    LOG_INF("Preparing LTE location config");
 
     location_config_defaults_set(&config, ARRAY_SIZE(methods), methods);
 
@@ -124,11 +133,19 @@ int location_service_start_lte_location(void)
 
     LOG_INF("Starting LTE location request");
 
+
+    LOG_INF("About to call location_request");
+
     err = location_request(&config);
+
+    LOG_INF("location_request returned err=%d", err);
+
     if (err) {
         LOG_ERR("location_request failed, err=%d", err);
         return err;
     }
+
+    LOG_INF("LTE location request started successfully");
 
     return 0;
 }

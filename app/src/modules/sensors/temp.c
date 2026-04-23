@@ -117,7 +117,7 @@ static void temp_thread(void *arg1, void *arg2, void *arg3)
 			LOG_WRN("Temperature read failed: %d", ret);
 		} else {
 			temp_publish_sample(&sample);
-			temp_log_sample(&sample);
+			//temp_log_sample(&sample);
 		}
 
 		k_sleep(K_SECONDS(TEMP_POLL_INTERVAL_SEC));
