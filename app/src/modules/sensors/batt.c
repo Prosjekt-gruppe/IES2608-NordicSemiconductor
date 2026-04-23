@@ -6,6 +6,7 @@
 
 #include "batt.h"
 #include "app_zbus.h"
+#include "sensor_print_ctrl.h"
 
 #include <errno.h>
 #include <iso646.h>
@@ -188,7 +189,9 @@ static void batt_thread(void *arg1, void *arg2, void *arg3)
 			LOG_WRN("Battery read failed: %d", ret);
 		} else {
 			batt_publish_sample(&sample);
-			//batt_log_sample(&sample);
+			if (sensor_print_ctrl_batt_enabled()) {
+				batt_log_sample(&sample);
+			}
 		}
 
 		k_sleep(K_SECONDS(BATT_POLL_INTERVAL_SEC));

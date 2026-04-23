@@ -109,6 +109,16 @@ config APP_SENSOR_TEMP_DEMO
       Build the BME680 environmental sensor demo.
       Enable this on boards that actually provide a compatible temperature sensor.
 
+config APP_SENSOR_PRINT_SHELL
+    bool "Enable serial commands for sensor printouts"
+    default y if APP_SENSOR_ACCEL_DEMO || APP_SENSOR_BATT_DEMO
+    depends on APP_SENSOR_ACCEL_DEMO || APP_SENSOR_BATT_DEMO
+    select SHELL
+    select SHELL_BACKEND_SERIAL
+    help
+      Adds serial shell commands for enabling or disabling noisy sensor printouts.
+      Sensor sampling and internal event publishing continue even when printouts are off.
+
 config APP_FIELD_LOG
     bool "Enable compact field log"
     default y if APP_SENSOR_BATT_DEMO

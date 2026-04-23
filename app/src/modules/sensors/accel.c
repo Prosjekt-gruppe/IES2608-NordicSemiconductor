@@ -7,6 +7,7 @@
 #include "accel.h"
 #include "app_zbus.h"
 #include "rsrp_service.h"
+#include "sensor_print_ctrl.h"
 
 #include <iso646.h>
 #include <stdbool.h>
@@ -279,9 +280,12 @@ static void accel_thread(void *arg1, void *arg2, void *arg3)
 							    xyz_mg, zero_linear_xyz_mg);
 			last_zbus_publish_ts_ms = now_ms;
 			motion_state_was_reported = true;
-			LOG_INF("Accelerometer baseline calibrated: xyz=(%d, %d, %d) mg, gravity=%u mg",
-				baseline_xyz_mg[0], baseline_xyz_mg[1], baseline_xyz_mg[2],
-				accel_raw_magnitude_mg(baseline_xyz_mg));
+			if (sensor_print_ctrl_accel_enabled()) {
+				LOG_INF("Accelerometer baseline calibrated: xyz=(%d, %d, %d) mg, gravity=%u mg",
+					baseline_xyz_mg[0], baseline_xyz_mg[1],
+					baseline_xyz_mg[2],
+					accel_raw_magnitude_mg(baseline_xyz_mg));
+			}
 			k_sleep(K_MSEC(ACCEL_POLL_INTERVAL_MS));
 			continue;
 		}
@@ -332,8 +336,10 @@ static void accel_thread(void *arg1, void *arg2, void *arg3)
 		if ((quiet_time_ms >= ACCEL_ZERO_VELOCITY_MS) and
 		    not accel_velocity_is_zero(velocity_mm_s)) {
 			accel_zero_xyz(velocity_mm_s);
-			LOG_INF("Standstill recalibration: velocity reset after %u ms without acceleration",
-				quiet_time_ms);
+			if (sensor_print_ctrl_accel_enabled()) {
+				LOG_INF("Standstill recalibration: velocity reset after %u ms without acceleration",
+					quiet_time_ms);
+			}
 		}
 
 		speed_mm_s = accel_vector_magnitude_mg(velocity_mm_s[0],
@@ -357,7 +363,10 @@ static void accel_thread(void *arg1, void *arg2, void *arg3)
 					  CONFIG_APP_SENSOR_ACCEL_MOVING_HOLD_MS);
 		is_moving_now = movement_detected_now or movement_seen_recently;
 
-		if ((not sample_is_quiet) and
+		const bool accel_prints_enabled = sensor_print_ctrl_accel_enabled();
+
+		if (accel_prints_enabled and
+		    (not sample_is_quiet) and
 		    (linear_accel_mg >= ACCEL_MOVEMENT_THRESHOLD_MG) and
 		    ((last_motion_log_ts_ms == 0U) or
 		     ((now_ms - last_motion_log_ts_ms) >= ACCEL_MOVEMENT_LOG_INTERVAL_MS))) {
@@ -374,12 +383,14 @@ static void accel_thread(void *arg1, void *arg2, void *arg3)
 		if (motion_state_has_changed) {
 			rsrp_service_set_motion_hint(is_moving_now, speed_mm_s, linear_accel_mg);
 
-			if (is_moving_now) {
-				LOG_INF("Motion state: moving (speed=%u mm/s, accel=%u mg)",
-					speed_mm_s, linear_accel_mg);
-			} else {
-				LOG_INF("Motion state: still (speed=%u mm/s, quiet=%u ms)",
-					speed_mm_s, quiet_time_ms);
+			if (accel_prints_enabled) {
+				if (is_moving_now) {
+					LOG_INF("Motion state: moving (speed=%u mm/s, accel=%u mg)",
+						speed_mm_s, linear_accel_mg);
+				} else {
+					LOG_INF("Motion state: still (speed=%u mm/s, quiet=%u ms)",
+						speed_mm_s, quiet_time_ms);
+				}
 			}
 
 			last_reported_moving = is_moving_now;
