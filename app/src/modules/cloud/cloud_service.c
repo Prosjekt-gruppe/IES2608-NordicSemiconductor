@@ -1,7 +1,8 @@
 #include "cloud_service.h"
+#include "gnss_service.h"
 #include "app_events.h"
 
-
+#include <net/nrf_cloud_agnss.h>
 #include <net/nrf_cloud.h>
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
@@ -74,6 +75,24 @@ static void cloud_event_handler(const struct nrf_cloud_evt *evt)
             LOG_ERR("Cloud error");
             (void)publish_cloud_fail();
             break; 
+        case NRF_CLOUD_EVT_RX_DATA_GENERAL:
+            LOG_INF("Cloud RX data (general), len=%d", evt->data.len);
+
+            if (evt->data.ptr && evt->data.len > 0) {
+
+                int err = nrf_cloud_agnss_process(evt->data.ptr, evt->data.len);
+                LOG_INF("nrf_cloud_agnss_process() -> %d", err); 
+
+
+                if (!err) {
+                    LOG_INF("A-GNSS data processed and injected");
+                    gnss_notify_agnss_ready(); 
+                    
+                } else {
+                    LOG_ERR("A-GNSS processing failed: %d", err);
+                }
+            }
+            break;
 
         default:
             LOG_WRN("Unhandled cloud event: %d", evt->type); 

@@ -231,5 +231,12 @@ config APP_DEBUG_CORE_UDP_BURST_TEST
     Debug UDP burst send
 
     
+  config APP_DEBUG_GNSS_ACQUIRE
+  bool "Halt after GNSS result"
+  depends on APP_DEBUG
+  default n
+  help 
+    Stop after GNSS returns success or timeout
+    instead of continuing to later stages
 endmenu
 

@@ -45,6 +45,10 @@ const char *app_evt_name(enum app_evt_type type)
     case EVT_LTE_LOC_FAIL: return "EVT_LTE_LOC_FAIL";
     case EVT_LTE_LOC_TIMEOUT: return "EVT_LTE_LOC_TIMEOUT";
 
+    case EVT_START_CLOUD: return "EVT_START_CLOUD";
+    case EVT_START_LTE_LOC: return "EVT_START_LTE_LOC"; 
+    case EVT_START_GNSS: return "EVT_START_GNSS"; 
+
     case EVT_CLOUD_OK: return "EVT_CLOUD_OK";
     case EVT_CLOUD_FAIL: return "EVT_CLOUD_FAIL";
     case EVT_CLOUD_DISCONNECTED: return "EVT_CLOUD_DISCONNECTED";
