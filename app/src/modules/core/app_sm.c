@@ -387,7 +387,8 @@ static void ltem_connected_entry(void *obj)
         };
 
         LOG_INF("LTEM_CONNECTED: requesting cloud connect");
-        (void)app_event_put(&ev, K_NO_WAIT);
+        int pub_err = app_event_put(&ev, K_NO_WAIT);
+        LOG_INF("app_event_put(EVT_START_LTE_LOC) -> %d", pub_err); 
         return;
     }
 
@@ -397,7 +398,8 @@ static void ltem_connected_entry(void *obj)
         };
 
         LOG_INF("LTEM_CONNECTED: requesting LTE location");
-        (void)app_event_put(&ev, K_NO_WAIT);
+        int pub_err = app_event_put(&ev, K_MSEC(10));
+        LOG_INF("app_event_put(EVT_START_LTE_LOC) -> %d", pub_err);
         return;
     }
 
@@ -406,7 +408,8 @@ static void ltem_connected_entry(void *obj)
             .type = EVT_START_GNSS
         };
         LOG_INF("LTEM_CONNECTED: requesting GNSS acquire");
-        (void)app_event_put(&ev, K_NO_WAIT);
+        int pub_err = app_event_put(&ev, K_NO_WAIT);
+        LOG_INF("app_event_put(EVT_START_LTE_LOC) -> %d", pub_err);
         return; 
     }
 }

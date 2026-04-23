@@ -173,6 +173,7 @@ static void batt_log_sample(const struct batt_sample *sample)
 		sample->charger_error);
 }
 
+
 static void batt_thread(void *arg1, void *arg2, void *arg3)
 {
 	ARG_UNUSED(arg1);
@@ -187,7 +188,7 @@ static void batt_thread(void *arg1, void *arg2, void *arg3)
 			LOG_WRN("Battery read failed: %d", ret);
 		} else {
 			batt_publish_sample(&sample);
-			batt_log_sample(&sample);
+			//batt_log_sample(&sample);
 		}
 
 		k_sleep(K_SECONDS(BATT_POLL_INTERVAL_SEC));
