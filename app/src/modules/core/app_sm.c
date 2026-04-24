@@ -379,6 +379,7 @@ static void ltem_connected_entry(void *obj)
 #if defined(CONFIG_APP_CORE_SM_PROBE_TEST)
     LOG_INF("ltem timer start");
     k_timer_start(&ctx->lte_timer, K_MSEC(3000), K_NO_WAIT);
+    return;
 #endif
     
     // debug
@@ -646,17 +647,25 @@ static void gnss_acquire_entry(void *obj)
     LOG_INF("GNSS goal=%d timeout=%d sec",
             ctx->gnss_goal, timeout_sec);
 
+#if defined(CONFIG_APP_TEST_FAKE_GNSS_FIX)
+    LOG_WRN("TEST: publishing fake GNSS fix via zbus");
+
+    (void)app_zbus_publish_gnss_status(APP_GNSS_STATE_FIX,
+                                       0,
+                                       1234,
+                                       63.4305,
+                                       10.3951,
+                                       50.0f,
+                                       7);
+    return;
+#endif
+
     err = gnss_service_start_assisted(timeout_sec);
     LOG_INF("gnss_service_start_assisted() -> %d", err);
-
+    
     if (err) {
         LOG_ERR("gnss_service_start_assisted failed: %d", err);
-
-        struct app_event ev = {
-            .type = EVT_TIMEOUT
-        };
-
-        (void)app_event_put(&ev, K_NO_WAIT);
+        (void)app_zbus_publish_gnss_error(err);
         return;
     }
 
@@ -666,10 +675,20 @@ static void gnss_acquire_entry(void *obj)
 static enum smf_state_result gnss_acquire_run(void *obj)
 {
     struct app_ctx *ctx = obj;
+    const struct app_gnss_status *gnss;
 
-    switch (ctx->ev.type) {
-    case EVT_GNSS_FIX:
-        ctx->last_pvt = ctx->ev.pvt;
+    if (ctx->input.type != INPUT_GNSS) {
+        return SMF_EVENT_HANDLED;
+    }
+
+    gnss = &ctx->input.data.gnss;
+
+    switch (gnss->state) {
+    case APP_GNSS_STATE_FIX:
+        ctx->last_pvt.latitude = gnss->latitude;
+        ctx->last_pvt.longitude = gnss->longitude;
+        ctx->last_pvt.altitude = gnss->altitude;
+
         ctx->have_fix = true;
         ctx->last_done = STEP_GNSS_DONE;
         ctx->gnss_goal = GNSS_GOAL_NONE;
@@ -677,15 +696,14 @@ static enum smf_state_result gnss_acquire_run(void *obj)
         ctx->gnss_extend_once = false;
 
         LOG_INF("GNSS FIX OK: lat=%f, lon=%f",
-                (double)ctx->last_pvt.latitude,
-                (double)ctx->last_pvt.longitude);
-        LOG_WRN("TRANSITION: STATE_GNSS_ACQUIRE -> STATE_LTEM_CONNECTED");
+                (double)gnss->latitude,
+                (double)gnss->longitude);
 
+        LOG_WRN("TRANSITION: STATE_GNSS_ACQUIRE -> STATE_LTEM_CONNECTED");
         transition_to_state(ctx, STATE_LTEM_CONNECTED);
         return SMF_EVENT_HANDLED;
-    
 
-    case EVT_TIMEOUT:
+    case APP_GNSS_STATE_TIMEOUT:
         LOG_INF("GNSS_ACQUIRE: gnss timeout");
 
         if (ctx->gnss_goal == GNSS_GOAL_REQUIRED_FOR_NTN &&
@@ -701,15 +719,26 @@ static enum smf_state_result gnss_acquire_run(void *obj)
         ctx->gnss_goal = GNSS_GOAL_NONE;
         ctx->gnss_timeout_sec = 0;
         ctx->gnss_extend_once = false;
-        
+
         LOG_WRN("No GNSS fix obtained");
         LOG_WRN("TRANSITION: STATE_GNSS_ACQUIRE -> STATE_LTEM_CONNECTED");
 
         transition_to_state(ctx, STATE_LTEM_CONNECTED);
         return SMF_EVENT_HANDLED;
 
+    case APP_GNSS_STATE_ERROR:
+        LOG_WRN("GNSS_ACQUIRE: gnss error=%d", gnss->err);
+
+        ctx->last_done = STEP_GNSS_DONE;
+        ctx->gnss_goal = GNSS_GOAL_NONE;
+        ctx->gnss_timeout_sec = 0;
+        ctx->gnss_extend_once = false;
+
+        LOG_WRN("TRANSITION: STATE_GNSS_ACQUIRE -> STATE_LTEM_CONNECTED");
+        transition_to_state(ctx, STATE_LTEM_CONNECTED);
+        return SMF_EVENT_HANDLED;
+
     default:
-        LOG_INF("default smf handled");
         return SMF_EVENT_HANDLED;
     }
 }
@@ -717,8 +746,14 @@ static enum smf_state_result gnss_acquire_run(void *obj)
 static void gnss_acquire_exit(void *obj)
 {
     ARG_UNUSED(obj);
+
     (void)gnss_service_cancel_timeout();
-    (void)gnss_service_stop();
+
+    int err = gnss_service_stop();
+    if (err && err != -EALREADY) {
+        LOG_WRN("gnss_service_stop failed: %d", err);
+    }
+
     LOG_WRN("EXIT: STATE_GNSS_ACQUIRE");
 }
 
@@ -1093,7 +1128,10 @@ static void smf_thread(void *p1, void *p2, void *p3)
         const struct zbus_channel *chan;
         union app_sm_msg msg = {0};
         int err = zbus_sub_wait_msg(&app_fsm_sub, &chan, &msg, K_FOREVER);
-
+        
+        LOG_INF("zbus msg from %s", zbus_chan_name(chan));
+        
+        
         if (err) {
             LOG_WRN("zbus_sub_wait_msg failed, err=%d", err);
             continue;
@@ -1105,12 +1143,17 @@ static void smf_thread(void *p1, void *p2, void *p3)
             continue;
         }
 
-        /*
+        
         if (chan == &gnss_status_chan) {
-            handle_gnss_status(ctx, &msg.gnss_status);
+            //handle_gnss_status(ctx, &msg.gnss_status);
+            ctx->input.type = INPUT_GNSS;
+            ctx->input.data.gnss = msg.gnss_status;
+            //dispatch_app_even(ctx, &msg.gnss_status);
+
+            (void)smf_run_state(SMF_CTX(ctx));
             continue;
         }
-        */
+    
 
         LOG_WRN("Received message from unexpected channel: %s", zbus_chan_name(chan));
     }

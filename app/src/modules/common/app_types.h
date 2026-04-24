@@ -7,8 +7,14 @@
 #pragma once
 
 #include <stdbool.h>
+#include <stdint.h>
 #include <nrf_modem_gnss.h>
 #include <zephyr/smf.h>
+#include "app_gnss_types.h"
+
+/*
+ * For shared contracts between modules
+ */
 
 enum rat {
     RAT_LTEM,
@@ -79,6 +85,14 @@ enum gnss_goal {
     GNSS_GOAL_REQUIRED_FOR_NTN,
 };
 
+enum app_input_type {
+    INPUT_NONE,
+    INPUT_EVENT,
+    INPUT_GNSS,
+    INPUT_CLOUD,
+    INPUT_LOCATION,
+};
+
 
 struct app_event {
     enum app_evt_type type;
@@ -89,10 +103,21 @@ struct app_event {
     };
 };
 
+struct app_input {
+    enum app_input_type type;
+
+    union {
+        struct app_event event;
+        struct app_gnss_status gnss;
+        //struct app_cloud_status cloud;
+        //struct app_location_status location;
+    } data;
+};
 
 struct app_ctx {
     struct smf_ctx ctx;
     enum app_state state;
+    struct app_input input;
     
     /* rat overview */
     enum rat active_rat;

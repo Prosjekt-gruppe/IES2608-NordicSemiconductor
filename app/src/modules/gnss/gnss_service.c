@@ -5,8 +5,9 @@
  */
 
 #include "gnss_service.h"
+#include "app_gnss_types.h"
 #include "app_zbus.h"
-#include "app_events.h"
+//#include "app_events.h"
 #include "cloud_service.h"
 
 #if defined(CONFIG_APP_FIELD_LOG)
@@ -63,11 +64,20 @@ static void gnss_restart_with_agnss(void);
 
 static int publish_timeout(void)
 {
+    
+    /*
     struct app_event ev = {
         .type = EVT_TIMEOUT,
     };
+    */
 
-    (void)app_zbus_publish_gnss_status(APP_GNSS_STATE_TIMEOUT,
+    /* stop service from inside gnss service could be more robust */
+    int err = gnss_service_stop();
+    if (err) {
+        LOG_ERR("publish timeout gnss service stop failed");
+    }
+
+    return app_zbus_publish_gnss_status(APP_GNSS_STATE_TIMEOUT,
                                        0,
                                        -1,
                                        0.0,
@@ -75,11 +85,12 @@ static int publish_timeout(void)
                                        0.0f,
                                        0);
 
-    return app_event_put(&ev, K_NO_WAIT);
+    //return app_event_put(&ev, K_NO_WAIT);
 }
 
 static int publish_error(int err)
 {
+
     (void)app_zbus_publish_gnss_status(APP_GNSS_STATE_ERROR,
                                        err,
                                        -1,
@@ -92,6 +103,8 @@ static int publish_error(int err)
 
 static int publish_fix(const struct nrf_modem_gnss_pvt_data_frame *pvt, int64_t ttff_ms)
 {
+    
+    /*
     struct app_event ev = {
         .type = EVT_GNSS_FIX,
     };
@@ -99,9 +112,13 @@ static int publish_fix(const struct nrf_modem_gnss_pvt_data_frame *pvt, int64_t 
     ev.pvt.latitude = pvt->latitude;
     ev.pvt.longitude = pvt->longitude;
     ev.pvt.altitude = pvt->altitude;
-    ev.pvt.accuracy = pvt->accuracy;
+    ev.pvt.accuracy = pvt->accuracy;    
+    */
 
-    (void)app_zbus_publish_gnss_status(APP_GNSS_STATE_FIX,
+   /* fix ok could probably just cancel timeout then? */
+   (void)gnss_service_cancel_timeout();
+
+    return app_zbus_publish_gnss_status(APP_GNSS_STATE_FIX,
                                        0,
                                        ttff_ms,
                                        pvt->latitude,
@@ -109,7 +126,7 @@ static int publish_fix(const struct nrf_modem_gnss_pvt_data_frame *pvt, int64_t 
                                        pvt->altitude,
                                        count_tracked_satellites(pvt));
 
-    return app_event_put(&ev, K_NO_WAIT);
+    //return app_event_put(&ev, K_NO_WAIT);
 }
 
 static int publish_error_as_timeout(int err)
@@ -122,7 +139,10 @@ static int handle_error(int err)
 {
     LOG_ERR("GNSS service error, err=%d", err);
     (void)publish_error(err);
-    (void)publish_error_as_timeout(err);
+    
+    /* let fsm decide how to handle error? */
+    //(void)publish_error_as_timeout(err);
+    
     return err;
 }
 

@@ -13,6 +13,7 @@
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
 
+
 LOG_MODULE_REGISTER(app_zbus, LOG_LEVEL_INF);
 
 ZBUS_OBS_DECLARE(app_fsm_sub);
@@ -98,6 +99,19 @@ int app_zbus_publish_gnss_status(enum app_gnss_state state, int err,
 	};
 
 	return publish_status(&gnss_status_chan, &msg);
+}
+
+int app_zbus_publish_gnss_error(int err)
+{
+    return app_zbus_publish_gnss_status(
+        APP_GNSS_STATE_ERROR,
+        err,
+        -1,
+        0.0,
+        0.0,
+        0.0f,
+        0
+    );
 }
 
 int app_zbus_publish_accel_sample(bool moving, uint32_t speed_mm_s,

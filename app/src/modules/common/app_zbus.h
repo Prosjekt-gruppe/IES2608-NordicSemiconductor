@@ -10,25 +10,9 @@
 #include <stdint.h>
 
 #include <zephyr/zbus/zbus.h>
+#include "app_gnss_types.h"
 
-enum app_gnss_state {
-	APP_GNSS_STATE_IDLE = 0,
-	APP_GNSS_STATE_INITIALIZED,
-	APP_GNSS_STATE_STARTED,
-	APP_GNSS_STATE_FIX,
-	APP_GNSS_STATE_TIMEOUT,
-	APP_GNSS_STATE_ERROR,
-};
 
-struct app_gnss_status {
-	enum app_gnss_state state;
-	int err;
-	int64_t time_to_first_fix_ms;
-	double latitude;
-	double longitude;
-	float altitude;
-	uint8_t tracked_satellites;
-};
 
 struct app_accel_sample {
 	int64_t timestamp_ms;
@@ -72,6 +56,8 @@ int app_zbus_publish_gnss_status(enum app_gnss_state state, int err,
 				 double longitude, float altitude,
 				 uint8_t tracked_satellites);
 
+int app_zbus_publish_gnss_error(int err);
+
 int app_zbus_publish_accel_sample(bool moving, uint32_t speed_mm_s,
 				  uint32_t linear_accel_mg,
 				  uint32_t quiet_time_ms,
@@ -85,3 +71,5 @@ int app_zbus_publish_battery_sample(int64_t voltage_mv, int64_t current_ma,
 int app_zbus_publish_environment_sample(int64_t temp_mdegc, int64_t pressure_pa,
 					int64_t humidity_milli_pct,
 					int64_t gas_ohm);
+
+

@@ -186,6 +186,9 @@ config APP_MAX_LTEM_RETRIES
     help
       Set LTEM retries.
 
+config APP_TEST_FAKE_GNSS_FIX
+    bool "Test fake gnss fix"
+    default n
 
 endmenu
 
