@@ -4,6 +4,7 @@ Decode `fieldlog dump` output into a more readable table or expanded CSV/JSON.
 
 Supported formats:
 - v2 mixed field log rows: state changes + 10-minute summaries
+- raw v2 binary records from LDS `/fieldlog.bin`
 - v1 legacy battery-only summary rows
 
 The parser is intentionally tolerant:
@@ -13,6 +14,7 @@ The parser is intentionally tolerant:
 
 Examples:
     python scripts/fieldlog_decode.py fieldlog_dump.txt
+    python scripts/fieldlog_decode.py fieldlog.bin
     python scripts/fieldlog_decode.py fieldlog_dump.txt --format csv --output decoded.csv
     python scripts/fieldlog_decode.py fieldlog_dump.txt --format json
     type fieldlog_dump.txt | python scripts/fieldlog_decode.py -
@@ -24,6 +26,7 @@ import argparse
 import csv
 import json
 import re
+import struct
 import sys
 from pathlib import Path
 from typing import Iterable, List, Sequence
@@ -41,6 +44,67 @@ LEGACY_ROW_PATTERN = re.compile(
 )
 
 V2_PREFIXES = ("state,", "summary,")
+
+FIELD_LOG_RECORD_SIZE = 32
+FIELD_LOG_RECORD_MAGIC = 0x464C
+FIELD_LOG_RECORD_VERSION = 2
+FIELD_LOG_RECORD_TYPE_STATE = 1
+FIELD_LOG_RECORD_TYPE_SUMMARY = 2
+FIELD_LOG_LOCATION_ACCURACY_UNKNOWN = 0xFFFF
+FIELD_LOG_RSRP_UNKNOWN = -32768
+
+STATE_NAMES = {
+    0: "STATE_BOOT",
+    1: "STATE_IDLE",
+    2: "STATE_GNSS_ACQUIRE",
+    3: "STATE_NTN_CONNECTING",
+    4: "STATE_NTN_CONNECTED",
+    5: "STATE_LTEM_CONNECTING",
+    6: "STATE_LTEM_CONNECTED",
+    7: "STATE_CLOUD_CONNECTING",
+    8: "STATE_LTE_LOCATION",
+    9: "STATE_LTE_PROBE",
+    10: "STATE_BACKOFF",
+}
+
+EVENT_NAMES = {
+    0: "EVT_BOOT",
+    1: "EVT_REG_OK",
+    2: "EVT_REG_FAIL",
+    3: "EVT_START_CLOUD",
+    4: "EVT_START_LTE_LOC",
+    5: "EVT_START_GNSS",
+    6: "EVT_GNSS_FIX",
+    7: "EVT_GNSS_TIMEOUT",
+    8: "EVT_TIMEOUT",
+    9: "EVT_RSRP_UPDATE",
+    10: "EVT_LTE_POOR",
+    11: "EVT_LTE_GOOD",
+    12: "EVT_LTE_LOC_OK",
+    13: "EVT_LTE_LOC_FAIL",
+    14: "EVT_LTE_LOC_TIMEOUT",
+    15: "EVT_CLOUD_OK",
+    16: "EVT_CLOUD_FAIL",
+    17: "EVT_CLOUD_DISCONNECTED",
+    18: "EVT_BACKOFF_TIMEOUT",
+    19: "EVT_PDN_UP",
+    20: "EVT_PDN_DOWN",
+    21: "EVT_MODEM_SWITCH_FAIL",
+    22: "EVT_MODEM_SWITCH_CMD_OK",
+    23: "EVT_TN_READY_FOR_PROBE",
+}
+
+RAT_NAMES = {
+    0: "LTE-M",
+    1: "NTN",
+}
+
+LOCATION_NAMES = {
+    0: "none",
+    1: "lte",
+    2: "gnss",
+    3: "agnss",
+}
 
 FLAG_NO_BATTERY_SAMPLES = 1 << 0
 FLAG_VBUS_SEEN_V2 = 1 << 1
@@ -82,6 +146,24 @@ def decode_v1_flags(flags_raw: int) -> str:
     if flags_raw & FLAG_VBUS_SEEN_V1:
         names.append("vbus_seen")
     return "|".join(names) if names else "-"
+
+
+def crc16_ccitt(data: bytes) -> int:
+    crc = 0xFFFF
+
+    for byte in data:
+        crc ^= byte << 8
+        for _ in range(8):
+            if crc & 0x8000:
+                crc = ((crc << 1) ^ 0x1021) & 0xFFFF
+            else:
+                crc = (crc << 1) & 0xFFFF
+
+    return crc
+
+
+def format_coordinate_e6(value_e6: int) -> str:
+    return f"{value_e6 / 1_000_000:.6f}"
 
 
 def parse_legacy_row(row_text: str) -> dict:
@@ -188,6 +270,93 @@ def parse_v2_row(row_text: str) -> dict:
     raise ValueError(f"unknown row type: {row_type!r}")
 
 
+def parse_binary_record(record: bytes) -> dict | None:
+    if len(record) != FIELD_LOG_RECORD_SIZE:
+        raise ValueError(f"expected {FIELD_LOG_RECORD_SIZE} bytes, got {len(record)}")
+
+    if all(byte == 0xFF for byte in record):
+        return None
+
+    stored_crc = struct.unpack_from("<H", record, FIELD_LOG_RECORD_SIZE - 2)[0]
+    expected_crc = crc16_ccitt(record[: FIELD_LOG_RECORD_SIZE - 2])
+    if stored_crc != expected_crc:
+        raise ValueError("record CRC mismatch")
+
+    magic, version, record_type, seq, uptime_s = struct.unpack_from("<HBBII", record, 0)
+    if magic != FIELD_LOG_RECORD_MAGIC or version != FIELD_LOG_RECORD_VERSION:
+        raise ValueError("not a field log v2 binary record")
+
+    payload = record[12:30]
+
+    if record_type == FIELD_LOG_RECORD_TYPE_STATE:
+        (
+            from_state,
+            to_state,
+            reason,
+            active_rat,
+            next_rat,
+            location_source,
+            last_rsrp_dbm,
+            latitude_e6,
+            longitude_e6,
+            accuracy_m,
+        ) = struct.unpack("<BBBBBBhiiH", payload)
+
+        has_location = location_source != 0
+        return {
+            "type": "state",
+            "session": None,
+            "seq": seq,
+            "uptime_s": uptime_s,
+            "uptime_hms": seconds_to_hms(uptime_s),
+            "from_state": STATE_NAMES.get(from_state, f"STATE_{from_state}"),
+            "to_state": STATE_NAMES.get(to_state, f"STATE_{to_state}"),
+            "reason": EVENT_NAMES.get(reason, f"EVT_{reason}"),
+            "active_rat": RAT_NAMES.get(active_rat, f"RAT_{active_rat}"),
+            "next_rat": RAT_NAMES.get(next_rat, f"RAT_{next_rat}"),
+            "location_source": LOCATION_NAMES.get(location_source, f"loc_{location_source}"),
+            "latitude": format_coordinate_e6(latitude_e6) if has_location else "",
+            "longitude": format_coordinate_e6(longitude_e6) if has_location else "",
+            "accuracy_m": None if accuracy_m == FIELD_LOG_LOCATION_ACCURACY_UNKNOWN else accuracy_m,
+            "last_rsrp_dbm": None if last_rsrp_dbm == FIELD_LOG_RSRP_UNKNOWN else last_rsrp_dbm,
+        }
+
+    if record_type == FIELD_LOG_RECORD_TYPE_SUMMARY:
+        (
+            interval_s,
+            power_total_uwh,
+            power_interval_uwh,
+            lte_losses_total,
+            lte_losses_interval,
+            switchbacks_total,
+            switchbacks_interval,
+            flags_raw,
+            dropped_messages,
+        ) = struct.unpack("<HIIHBHBBB", payload)
+
+        return {
+            "type": "summary",
+            "session": None,
+            "seq": seq,
+            "uptime_s": uptime_s,
+            "uptime_hms": seconds_to_hms(uptime_s),
+            "interval_s": interval_s,
+            "interval_hms": seconds_to_hms(interval_s),
+            "power_interval_uwh": power_interval_uwh,
+            "power_total_uwh": power_total_uwh,
+            "lte_losses_interval": lte_losses_interval,
+            "lte_losses_total": lte_losses_total,
+            "switchbacks_interval": switchbacks_interval,
+            "switchbacks_total": switchbacks_total,
+            "flags_raw": flags_raw,
+            "flags_hex": f"0x{flags_raw:02X}",
+            "flags_text": decode_v2_flags(flags_raw),
+            "dropped_messages": dropped_messages,
+        }
+
+    raise ValueError(f"unknown binary record type: {record_type}")
+
+
 def extract_row_text(line: str) -> str | None:
     stripped = line.strip()
     if not stripped or stripped.startswith("#"):
@@ -207,19 +376,7 @@ def extract_row_text(line: str) -> str | None:
     return None
 
 
-def parse_lines(lines: Iterable[str]) -> List[dict]:
-    rows: List[dict] = []
-
-    for line in lines:
-        row_text = extract_row_text(line)
-        if not row_text:
-            continue
-
-        if row_text.startswith(V2_PREFIXES):
-            rows.append(parse_v2_row(row_text))
-        else:
-            rows.append(parse_legacy_row(row_text))
-
+def assign_sessions(rows: List[dict]) -> List[dict]:
     rows.sort(key=lambda row: row["seq"])
 
     current_session: int | None = None
@@ -241,11 +398,56 @@ def parse_lines(lines: Iterable[str]) -> List[dict]:
     return rows
 
 
+def parse_lines(lines: Iterable[str]) -> List[dict]:
+    rows: List[dict] = []
+
+    for line in lines:
+        row_text = extract_row_text(line)
+        if not row_text:
+            continue
+
+        if row_text.startswith(V2_PREFIXES):
+            rows.append(parse_v2_row(row_text))
+        else:
+            rows.append(parse_legacy_row(row_text))
+
+    return assign_sessions(rows)
+
+
+def parse_binary(data: bytes) -> List[dict]:
+    rows: List[dict] = []
+    usable_len = len(data) - (len(data) % FIELD_LOG_RECORD_SIZE)
+
+    for offset in range(0, usable_len, FIELD_LOG_RECORD_SIZE):
+        row = parse_binary_record(data[offset : offset + FIELD_LOG_RECORD_SIZE])
+        if row is not None:
+            rows.append(row)
+
+    return assign_sessions(rows)
+
+
 def read_input(path_str: str) -> List[str]:
     if path_str == "-":
         return sys.stdin.read().splitlines()
 
     return Path(path_str).read_text(encoding="utf-8").splitlines()
+
+
+def read_input_bytes(path_str: str) -> bytes:
+    if path_str == "-":
+        return sys.stdin.buffer.read()
+
+    return Path(path_str).read_bytes()
+
+
+def looks_like_binary_fieldlog(data: bytes, path_str: str) -> bool:
+    if path_str != "-" and Path(path_str).suffix.lower() == ".bin":
+        return True
+
+    if len(data) < FIELD_LOG_RECORD_SIZE:
+        return False
+
+    return data[:3] == b"LF\x02"
 
 
 def build_summary(rows: Sequence[dict]) -> List[tuple[str, str]]:
@@ -405,6 +607,12 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
         help="Output format. Default: table.",
     )
     parser.add_argument(
+        "--input-format",
+        choices=("auto", "text", "binary"),
+        default="auto",
+        help="Input format. Default: auto.",
+    )
+    parser.add_argument(
         "--output",
         help="Optional output file. Defaults to stdout.",
     )
@@ -413,7 +621,14 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
 
 def main(argv: Sequence[str]) -> int:
     args = parse_args(argv)
-    rows = parse_lines(read_input(args.input))
+    if args.input_format == "text":
+        rows = parse_lines(read_input(args.input))
+    else:
+        raw = read_input_bytes(args.input)
+        if args.input_format == "binary" or looks_like_binary_fieldlog(raw, args.input):
+            rows = parse_binary(raw)
+        else:
+            rows = parse_lines(raw.decode("utf-8", errors="ignore").splitlines())
 
     if not rows:
         print("No fieldlog rows found in input.", file=sys.stderr)

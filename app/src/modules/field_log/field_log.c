@@ -184,6 +184,7 @@ struct field_log_message {
 BUILD_ASSERT(sizeof(struct field_log_state_record_payload) == 18);
 BUILD_ASSERT(sizeof(struct field_log_summary_record_payload) == 18);
 BUILD_ASSERT(sizeof(struct field_log_record) == FIELD_LOG_RECORD_SIZE);
+BUILD_ASSERT(FIELD_LOG_RECORD_SIZE == FIELD_LOG_RAW_RECORD_SIZE);
 BUILD_ASSERT((CONFIG_APP_FIELD_LOG_ERASE_BLOCK_SIZE % FIELD_LOG_RECORD_SIZE) == 0);
 
 static K_THREAD_STACK_DEFINE(field_log_stack, FIELD_LOG_STACK_SIZE);
@@ -1057,6 +1058,79 @@ int field_log_start(void)
 		CONFIG_APP_FIELD_LOG_SUMMARY_INTERVAL_SEC);
 
 	return 0;
+}
+
+int field_log_for_each_record_from(uint32_t first_sequence,
+				   uint16_t max_records,
+				   field_log_raw_record_cb_t callback,
+				   void *user_data,
+				   uint16_t *records_read)
+{
+	struct field_log_record record;
+	enum field_log_slot_state slot_state;
+	uint16_t copied = 0U;
+	int err = 0;
+
+	if (callback == NULL) {
+		return -EINVAL;
+	}
+
+	if (records_read != NULL) {
+		*records_read = 0U;
+	}
+
+	if (max_records == 0U) {
+		return 0;
+	}
+
+	k_mutex_lock(&field_log_storage_mutex, K_FOREVER);
+
+	if (!field_log_storage_available()) {
+		err = -ENODEV;
+		goto out;
+	}
+
+	for (off_t offset = 0; offset + sizeof(record) <= storage.capacity_bytes;
+	     offset += sizeof(record)) {
+		err = field_log_storage_read_slot(offset, &record, &slot_state);
+		if (err) {
+			goto out;
+		}
+
+		if (slot_state == FIELD_LOG_SLOT_EMPTY) {
+			break;
+		}
+
+		if (slot_state == FIELD_LOG_SLOT_INVALID) {
+			err = -EBADMSG;
+			goto out;
+		}
+
+		if (record.header.sequence < first_sequence) {
+			continue;
+		}
+
+		err = callback(record.header.sequence,
+			       (const uint8_t *)&record,
+			       user_data);
+		if (err) {
+			goto out;
+		}
+
+		copied++;
+		if (copied >= max_records) {
+			break;
+		}
+	}
+
+out:
+	if (records_read != NULL) {
+		*records_read = copied;
+	}
+
+	k_mutex_unlock(&field_log_storage_mutex);
+
+	return err;
 }
 
 void field_log_note_battery_sample(const struct app_battery_sample *sample)

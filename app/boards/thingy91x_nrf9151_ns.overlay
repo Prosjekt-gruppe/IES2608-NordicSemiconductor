@@ -5,6 +5,7 @@
 / {
 	aliases {
 		accel0 = &accelerometer_hp;
+		lds0 = &lds_esp32;
 	};
 };
 
@@ -14,4 +15,11 @@
 
 &bme680 {
 	status = "okay";
+};
+
+&i2c2 {
+	lds_esp32: lds@f {
+		compatible = "i2c-device";
+		reg = <0x0f>;
+	};
 };

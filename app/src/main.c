@@ -27,6 +27,10 @@
 #include "field_log.h"
 #endif
 
+#if defined(CONFIG_APP_LDS)
+#include "lds_service.h"
+#endif
+
 
 #if defined(CONFIG_APP_SENSOR_ACCEL_DEMO)
 #include "accel.h"
@@ -41,12 +45,22 @@ LOG_MODULE_REGISTER(app, LOG_LEVEL_INF);
 int main(void)
 {
     static struct app_ctx ctx;
+#if defined(CONFIG_APP_FIELD_LOG) || defined(CONFIG_APP_LDS)
+    int err;
+#endif
 
 #if defined(CONFIG_APP_FIELD_LOG)
-    int err = field_log_start();
+    err = field_log_start();
 
     if (err) {
         LOG_WRN("field_log_start failed: %d", err);
+    }
+#endif
+
+#if defined(CONFIG_APP_LDS)
+    err = lds_service_start();
+    if (err) {
+        LOG_WRN("lds_service_start failed: %d", err);
     }
 #endif
 

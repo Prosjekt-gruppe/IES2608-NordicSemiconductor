@@ -174,6 +174,59 @@ config APP_FIELD_LOG_SHELL
       Enable the fieldlog shell command group with info, dump and erase
       commands over the serial shell.
 
+config APP_LDS
+    bool "Enable LDS SD-card offload"
+    default n
+    depends on APP_FIELD_LOG
+    select I2C
+    help
+      Offload compact field log records to the external LDS module over I2C.
+      The field log still writes to local flash first; LDS copies completed
+      records to the SD card when the ESP32 acknowledges that they were stored.
+
+config APP_LDS_FIELD_LOG_RECORDS_PER_FRAME
+    int "Field log records per LDS I2C frame"
+    default 2
+    range 1 2
+    depends on APP_LDS
+    help
+      Number of 32-byte field log records sent in one I2C write. The default
+      keeps the full frame below the common 128-byte Arduino I2C slave buffer.
+
+config APP_LDS_OFFLOAD_INTERVAL_SEC
+    int "LDS field log offload interval in seconds"
+    default 60
+    range 10 3600
+    depends on APP_LDS
+    help
+      How often the Thingy tries to copy new field log records to LDS.
+
+config APP_LDS_OFFLOAD_MAX_RECORDS_PER_RUN
+    int "Maximum field log records copied per LDS offload run"
+    default 32
+    range 2 512
+    depends on APP_LDS
+    help
+      Upper bound for one offload pass. This prevents an SD-card outage from
+      causing a long I2C catch-up burst after LDS comes back.
+
+config APP_LDS_COMMIT_TIMEOUT_MS
+    int "LDS SD commit timeout in milliseconds"
+    default 250
+    range 50 5000
+    depends on APP_LDS
+    help
+      Time to wait for the ESP32 to report that a sent field-log batch has
+      been written to SD.
+
+config APP_LDS_STATUS_RETRY_MS
+    int "LDS status polling interval in milliseconds"
+    default 20
+    range 5 1000
+    depends on APP_LDS
+    help
+      Delay between status reads while waiting for an LDS SD commit.
+
 config APP_CORE_SEND_UDP_DATA
     bool "Send UDP data over NTN"
     help
