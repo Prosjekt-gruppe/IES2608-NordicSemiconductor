@@ -27,6 +27,7 @@ target_include_directories(app PRIVATE
     src/modules/common
     src/modules/core
     src/modules/field_log
+    src/modules/lds
     src/modules/gnss
     src/modules/lte
     src/modules/modem
@@ -55,4 +56,8 @@ endif()
 
 if(CONFIG_APP_FIELD_LOG)
     target_sources(app PRIVATE src/modules/field_log/field_log.c)
+endif()
+
+if(CONFIG_APP_LDS)
+    target_sources(app PRIVATE src/modules/lds/lds_service.c)
 endif()
