@@ -268,6 +268,9 @@ static void queueFieldLogFrame(int bytes) {
       Wire.read();
     }
     ldsStatus.rejected_frames++;
+    Serial.printf("LDS RX invalid length: got=%d expected=%u\n",
+                  bytes,
+                  (unsigned)sizeof(lds_field_log_frame_t));
     setStatus(LDS_STATUS_BAD_FRAME);
     return;
   }
@@ -281,6 +284,10 @@ static void queueFieldLogFrame(int bytes) {
 
   if (!validateFieldLogFrame(&frame)) {
     ldsStatus.rejected_frames++;
+    Serial.printf("LDS RX bad frame: seq=%lu records=%u payload=%u\n",
+                  (unsigned long)frame.first_sequence,
+                  frame.record_count,
+                  frame.payload_len);
     setStatus(LDS_STATUS_BAD_FRAME);
     return;
   }
@@ -294,10 +301,19 @@ static void queueFieldLogFrame(int bytes) {
   BaseType_t higherPriorityTaskWoken = pdFALSE;
   if (xQueueSendFromISR(queueFieldLog, &chunk, &higherPriorityTaskWoken) != pdTRUE) {
     ldsStatus.rejected_frames++;
+    Serial.printf("LDS RX queue full: seq=%lu records=%u payload=%u\n",
+                  (unsigned long)chunk.first_sequence,
+                  chunk.record_count,
+                  chunk.payload_len);
     setStatus(LDS_STATUS_QUEUE_FULL);
     return;
   }
 
+  Serial.printf("LDS RX fieldlog: seq=%lu..%lu records=%u payload=%u\n",
+                (unsigned long)chunk.first_sequence,
+                (unsigned long)(chunk.first_sequence + chunk.record_count - 1),
+                chunk.record_count,
+                chunk.payload_len);
   setStatus(LDS_STATUS_PENDING);
   portYIELD_FROM_ISR(higherPriorityTaskWoken);
 }
@@ -354,17 +370,32 @@ void SDTask(void *pvParameters) {
   while (1) {
     if (xQueueReceive(queueFieldLog, &chunk, 0) == pdTRUE) {
       File f = SD.open(fieldlogfile, FILE_APPEND);
+      size_t written = 0;
 
-      if (f && f.write(chunk.payload, chunk.payload_len) == chunk.payload_len) {
+      if (f) {
+        written = f.write(chunk.payload, chunk.payload_len);
+      }
+
+      if (f && written == chunk.payload_len) {
         f.close();
         ldsStatus.committed_frames++;
         ldsStatus.committed_records += chunk.record_count;
         ldsStatus.last_committed_sequence = chunk.first_sequence + chunk.record_count - 1;
+        Serial.printf("LDS SD stored: seq=%lu..%lu bytes=%u total_records=%lu\n",
+                      (unsigned long)chunk.first_sequence,
+                      (unsigned long)(chunk.first_sequence + chunk.record_count - 1),
+                      chunk.payload_len,
+                      (unsigned long)ldsStatus.committed_records);
         setStatus(LDS_STATUS_OK);
       } else {
         if (f) {
           f.close();
         }
+        Serial.printf("LDS SD write failed: seq=%lu..%lu requested=%u written=%u\n",
+                      (unsigned long)chunk.first_sequence,
+                      (unsigned long)(chunk.first_sequence + chunk.record_count - 1),
+                      chunk.payload_len,
+                      (unsigned)written);
         setStatus(LDS_STATUS_SD_ERROR);
       }
     }

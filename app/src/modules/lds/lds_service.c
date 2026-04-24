@@ -107,6 +107,26 @@ static uint16_t crc16_ccitt(const uint8_t *data, size_t len)
 	return crc;
 }
 
+static const char *lds_status_name(uint8_t status)
+{
+	switch (status) {
+	case LDS_STATUS_OK:
+		return "OK";
+	case LDS_STATUS_PENDING:
+		return "PENDING";
+	case LDS_STATUS_BUSY:
+		return "BUSY";
+	case LDS_STATUS_BAD_FRAME:
+		return "BAD_FRAME";
+	case LDS_STATUS_SD_ERROR:
+		return "SD_ERROR";
+	case LDS_STATUS_QUEUE_FULL:
+		return "QUEUE_FULL";
+	default:
+		return "UNKNOWN";
+	}
+}
+
 static int lds_validate_status(const struct lds_status_response *status)
 {
 	uint16_t expected_crc;
@@ -157,7 +177,8 @@ static void lds_update_cursor_from_status(void)
 	LOG_INF("LDS offload cursor starts at field log sequence %u", next_sequence);
 }
 
-static int lds_wait_for_commit(uint32_t wanted_sequence)
+static int lds_wait_for_commit(uint32_t wanted_sequence,
+			       struct lds_status_response *committed_status)
 {
 	int64_t deadline = k_uptime_get() + CONFIG_APP_LDS_COMMIT_TIMEOUT_MS;
 	struct lds_status_response status;
@@ -169,6 +190,10 @@ static int lds_wait_for_commit(uint32_t wanted_sequence)
 		if (err == 0) {
 			if (status.last_committed_sequence != LDS_NO_SEQUENCE &&
 			    status.last_committed_sequence >= wanted_sequence) {
+				if (committed_status != NULL) {
+					*committed_status = status;
+				}
+
 				if (status.status == LDS_STATUS_OK ||
 				    status.status == LDS_STATUS_PENDING) {
 					return 0;
@@ -255,6 +280,7 @@ static void lds_offload_once(void)
 
 	while (copied_this_run < CONFIG_APP_LDS_OFFLOAD_MAX_RECORDS_PER_RUN) {
 		struct lds_record_batch batch;
+		struct lds_status_response status;
 		uint16_t records_read = 0U;
 		int err = lds_build_batch(&batch, &records_read);
 
@@ -277,18 +303,31 @@ static void lds_offload_once(void)
 			return;
 		}
 
+		LOG_INF("LDS send: seq=%u..%u records=%u payload=%u bytes",
+			batch.frame.first_sequence,
+			batch.last_sequence,
+			batch.frame.record_count,
+			batch.frame.payload_len);
+
 		err = lds_send_batch(&batch);
 		if (err) {
 			LOG_WRN("LDS I2C write failed: %d", err);
 			return;
 		}
 
-		err = lds_wait_for_commit(batch.last_sequence);
+		err = lds_wait_for_commit(batch.last_sequence, &status);
 		if (err) {
 			LOG_WRN("LDS did not confirm field log sequence %u: %d",
 				batch.last_sequence, err);
 			return;
 		}
+
+		LOG_INF("LDS commit: seq=%u..%u status=%s total_records=%u rejected=%u",
+			batch.frame.first_sequence,
+			batch.last_sequence,
+			lds_status_name(status.status),
+			status.committed_records,
+			status.rejected_frames);
 
 		next_sequence = batch.last_sequence + 1U;
 		copied_this_run += batch.frame.record_count;
