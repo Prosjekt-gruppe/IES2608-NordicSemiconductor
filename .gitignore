@@ -54,3 +54,4 @@ build*/
 __pycache__/
 
 ntn_log.txt
+**/data/raw/
