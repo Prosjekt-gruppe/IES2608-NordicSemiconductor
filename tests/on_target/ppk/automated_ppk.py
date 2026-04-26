@@ -3,10 +3,14 @@
 # License: LicenseRef-Nordic-5-Clause (see upstream LICENSE)
 # Changes: refactored for our test setup
 
+import os
 import queue
 import threading
 import time
+from dataclasses import dataclass, field
+from threading import Lock
 
+import numpy as np
 import serial
 from ppk2_api.ppk2_api import PPK2_API, PPK2_Command
 
@@ -66,6 +70,41 @@ class PatchedPPK2(PPK2_API):
         self.after_spike = 0
         super().start_measuring()
 
+@dataclass
+class RecordingState:
+    t0_ns: int
+    sample_rate_hz: int
+    total_samples_written: int = 0
+    lock: Lock = field(default_factory=Lock)
+
+    def mark_samples_written(self, n: int):
+        with self.lock:
+            self.total_samples_written += n
+
+    def snapshot(self):
+        with self.lock:
+            t_ns = time.monotonic_ns() - self.t0_ns
+            sample_idx = self.total_samples_written
+        return t_ns, sample_idx
+    
+
+rec_state = RecordingState(
+    t0_ns=time.monotonic_ns(),
+    sample_rate_hz=100_000,
+)
+
+
+DATA_DIR = "data/raw"
+os.makedirs(DATA_DIR, exist_ok=True)
+
+# setup log files
+raw_file = open(os.path.join(DATA_DIR, "current_uA.bin"), "ab")
+event_file = open(os.path.join(DATA_DIR, "ppk_events.csv"), "a")
+
+if event_file.tell() == 0:
+    event_file.write("t_ns,sample_idx,source,message\n")
+
+
 PPK2_PORT = "/dev/serial/by-id/usb-Nordic_Semiconductor_PPK2_CB6017A1DC4B-if01"
 UART_PORT = "/dev/serial/by-id/usb-SEGGER_J-Link_001052041270-if00"
 UART_BAUDRATE = 115200
@@ -88,7 +127,7 @@ def configure_ppk2(port: str) -> PPK2_API:
     ppk2.get_modifiers()
     ppk2.use_source_meter()
     ppk2.set_source_voltage(SOURCE_VOLTAGE_MV)
-    ppk2.toggle_DUT_power("ON")
+    #ppk2.toggle_DUT_power("ON")
 
     return ppk2
 
@@ -107,7 +146,15 @@ def ppk_worker(ppk2: PPK2_API) -> None:
             if read_data:
                 samples, flags = ppk2.get_samples(read_data)
                 if samples:
+                    arr = np.asarray(samples, dtype=np.float32)
+
+                    # write raw values to binary
+                    arr.tofile(raw_file)
+                    raw_file.flush()
+
+                    rec_state.mark_samples_written(len(arr))
                     window_samples.extend(samples)
+
 
             now = time.perf_counter()
 
@@ -156,6 +203,12 @@ def uart_worker(port: str) -> None:
                 ts = time.time()
                 msg = line.decode(errors="replace").rstrip()
                 uart_queue.put((ts, msg))
+                t_ns, sample_idx = rec_state.snapshot()
+
+                event_file.write(
+                    f'{t_ns},{sample_idx},uart,"{msg}"\n'
+                )
+                event_file.flush()
             else:
                 idle_count += 1
                 if idle_count % 50 == 0:
@@ -168,7 +221,7 @@ def uart_worker(port: str) -> None:
 
 def main() -> None:
     ppk2 = configure_ppk2(PPK2_PORT)
-    print("PPK2 configured, waiting for DUT boot...")
+    print("PPK2 configured, starting baseline recording...")
     print("Modifiers:", ppk2.modifiers)
     print("adc_mult:", ppk2.adc_mult)
     time.sleep(2.0)
@@ -176,9 +229,19 @@ def main() -> None:
     ppk_thread = threading.Thread(target=ppk_worker, args=(ppk2,))
     uart_thread = threading.Thread(target=uart_worker, args=(UART_PORT,))
 
-    ppk_thread.start()
+    # start uart logger
     uart_thread.start()
+    
+    # start ppk logger
+    ppk_thread.start()
+    time.sleep(1.0)
 
+    ppk2.toggle_DUT_power("ON")
+    t_ns, sample_idx = rec_state.snapshot()
+    event_file.write(f"{t_ns},{sample_idx},system,DUT_POWER_ON\n")
+    event_file.flush()
+
+    
     try:
         while True:
             while not uart_queue.empty():
@@ -194,6 +257,8 @@ def main() -> None:
         stop_event.set()
         ppk_thread.join()
         uart_thread.join()
+        raw_file.close()
+        event_file.close()
         print("Clean shutdown")
 
 
