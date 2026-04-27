@@ -7,6 +7,7 @@ import os
 import queue
 import threading
 import time
+from argparse import ArgumentParser
 from dataclasses import dataclass, field
 from threading import Lock
 
@@ -109,13 +110,54 @@ PPK2_PORT = "/dev/serial/by-id/usb-Nordic_Semiconductor_PPK2_CB6017A1DC4B-if01"
 UART_PORT = "/dev/serial/by-id/usb-SEGGER_J-Link_001052041270-if00"
 UART_BAUDRATE = 115200
 SOURCE_VOLTAGE_MV = 3300
+MEASUREMENT_MODE = "ampere"
 
 
 uart_queue = queue.Queue()
 stop_event = threading.Event()
 
 
-def configure_ppk2(port: str) -> PPK2_API:
+def parse_args():
+    parser = ArgumentParser(description="Record PPK2 current and UART events.")
+    parser.add_argument(
+        "--ppk2-port",
+        default=PPK2_PORT,
+        help="Serial port for the PPK2.",
+    )
+    parser.add_argument(
+        "--uart-port",
+        default=UART_PORT,
+        help="Serial port for DUT UART logs.",
+    )
+    parser.add_argument(
+        "--uart-baudrate",
+        type=int,
+        default=UART_BAUDRATE,
+        help="UART baudrate for DUT logs.",
+    )
+    parser.add_argument(
+        "--mode",
+        choices=("ampere", "source"),
+        default=MEASUREMENT_MODE,
+        help=(
+            "PPK2 measurement mode. Use 'ampere' when the PPK2 is inserted "
+            "in series with an already-powered rail. Use 'source' when the "
+            "PPK2 should power the DUT."
+        ),
+    )
+    parser.add_argument(
+        "--source-voltage-mv",
+        type=int,
+        default=SOURCE_VOLTAGE_MV,
+        help=(
+            "Voltage in mV used by PPK2 source mode. The ppk2-api also uses "
+            "this value for sample conversion in ampere mode."
+        ),
+    )
+    return parser.parse_args()
+
+
+def configure_ppk2(port: str, mode: str, source_voltage_mv: int) -> PPK2_API:
     print("Using patched ppk2")
     ppk2 = PatchedPPK2(port)
 
@@ -124,10 +166,15 @@ def configure_ppk2(port: str) -> PPK2_API:
     ppk2.ser.reset_output_buffer()
     time.sleep(0.1)
 
-    ppk2.get_modifiers()
-    ppk2.use_source_meter()
-    ppk2.set_source_voltage(SOURCE_VOLTAGE_MV)
-    #ppk2.toggle_DUT_power("ON")
+    if not ppk2.get_modifiers():
+        raise RuntimeError("Failed to read PPK2 calibration metadata")
+
+    ppk2.set_source_voltage(source_voltage_mv)
+
+    if mode == "source":
+        ppk2.use_source_meter()
+    else:
+        ppk2.use_ampere_meter()
 
     return ppk2
 
@@ -184,8 +231,8 @@ def ppk_worker(ppk2: PPK2_API) -> None:
         print("Closed ppk2 thread ok")
 
 
-def uart_worker(port: str) -> None:
-    ser = serial.Serial(port, baudrate=UART_BAUDRATE, timeout=0.2)
+def uart_worker(port: str, baudrate: int) -> None:
+    ser = serial.Serial(port, baudrate=baudrate, timeout=0.2)
 
     # Leave DTR/RTS untouched for now since plain reading worked.
     time.sleep(0.1)
@@ -220,14 +267,16 @@ def uart_worker(port: str) -> None:
 
 
 def main() -> None:
-    ppk2 = configure_ppk2(PPK2_PORT)
-    print("PPK2 configured, starting baseline recording...")
+    args = parse_args()
+
+    ppk2 = configure_ppk2(args.ppk2_port, args.mode, args.source_voltage_mv)
+    print(f"PPK2 configured in {args.mode} mode, starting baseline recording...")
     print("Modifiers:", ppk2.modifiers)
     print("adc_mult:", ppk2.adc_mult)
     time.sleep(2.0)
 
     ppk_thread = threading.Thread(target=ppk_worker, args=(ppk2,))
-    uart_thread = threading.Thread(target=uart_worker, args=(UART_PORT,))
+    uart_thread = threading.Thread(target=uart_worker, args=(args.uart_port, args.uart_baudrate))
 
     # start uart logger
     uart_thread.start()
@@ -236,9 +285,12 @@ def main() -> None:
     ppk_thread.start()
     time.sleep(1.0)
 
-    ppk2.toggle_DUT_power("ON")
     t_ns, sample_idx = rec_state.snapshot()
-    event_file.write(f"{t_ns},{sample_idx},system,DUT_POWER_ON\n")
+    if args.mode == "source":
+        ppk2.toggle_DUT_power("ON")
+        event_file.write(f"{t_ns},{sample_idx},system,DUT_POWER_ON\n")
+    else:
+        event_file.write(f"{t_ns},{sample_idx},system,AMPERE_MODE_EXTERNAL_POWER\n")
     event_file.flush()
 
     
