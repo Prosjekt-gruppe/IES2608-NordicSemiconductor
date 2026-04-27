@@ -17,6 +17,21 @@
 LOG_MODULE_REGISTER(ntn_service, LOG_LEVEL_INF);
 
 static bool initialized;
+static bool ntn_mode_supported = true;
+
+static void log_at_response(const char *cmd)
+{
+    char response[128];
+    int err = nrf_modem_at_cmd(response, sizeof(response), "%s", cmd);
+
+    if (err == 0) {
+        LOG_INF("%s -> %s", cmd, response);
+    } else if (err > 0) {
+        LOG_WRN("%s failed: raw=%d at_err=%d", cmd, err, nrf_modem_at_err(err));
+    } else {
+        LOG_WRN("%s failed: %d", cmd, err);
+    }
+}
 
 static void ntn_lc_evt_handler(const struct lte_lc_evt *const evt)
 {    
@@ -103,21 +118,29 @@ static int ntn_service_prepare(struct app_ctx *ctx)
     };
 
 
-    if (!ctx->ntn_initialized) {
-        err = lte_lc_power_off();
-        if (err) {
-            return err;
-        }
+    if (!ntn_mode_supported) {
+        LOG_WRN("NTN mode previously failed; modem may not run mfw_nrf9151-ntn");
+        return -ENOTSUP;
+    }
 
+    err = lte_lc_power_off();
+    if (err) {
+        LOG_ERR("lte_lc_power_off before NTN setup failed: %d", err);
+        return err;
+    }
+
+    if (!ctx->ntn_initialized) {
         /* setup NTN profile */
         err = lte_lc_cellular_profile_configure(&ntn_profile);
         if (err) {
+            LOG_ERR("NTN cellular profile configuration failed: %d", err);
             return err;
         }
 
         /* setup TN profile */
         err = lte_lc_cellular_profile_configure(&tn_profile);
         if (err) {
+            LOG_ERR("TN cellular profile configuration failed: %d", err);
             return err;
         }
 
@@ -139,6 +162,12 @@ static int ntn_service_prepare(struct app_ctx *ctx)
                                  LTE_LC_SYSTEM_MODE_PREFER_AUTO);
     
     if (err) {
+        LOG_ERR("NTN system mode set failed: %d", err);
+        log_at_response("AT+CGMR");
+        log_at_response("AT%SHORTSWVER?");
+        log_at_response("AT%XSYSTEMMODE?");
+        LOG_ERR("LTE_LC_SYSTEM_MODE_NTN_NBIOT requires nRF9151 NTN modem firmware");
+        ntn_mode_supported = false;
         return err;
     }
 

@@ -780,7 +780,7 @@ static void ntn_connecting_entry(void *obj)
 
     if (err) {
         LOG_INF("ntn initialization failed (%d)", err);
-        struct app_event ev = { .type = EVT_REG_FAIL };
+        struct app_event ev = { .type = EVT_MODEM_SWITCH_FAIL };
         (void)app_event_put(&ev, K_NO_WAIT);
         return;
     }
@@ -826,6 +826,13 @@ static enum smf_state_result ntn_connecting_run(void *obj)
             ctx->next_rat = RAT_LTEM;
         }
         
+        transition_to_state(ctx, STATE_BACKOFF);
+        return SMF_EVENT_HANDLED;
+
+    case EVT_MODEM_SWITCH_FAIL:
+        LOG_WRN("NTN modem setup failed; returning to LTE-M path");
+        ctx->pdn_up = false;
+        ctx->next_rat = RAT_LTEM;
         transition_to_state(ctx, STATE_BACKOFF);
         return SMF_EVENT_HANDLED;
 
