@@ -37,7 +37,14 @@ plt.plot(t, samples, linewidth=0.8)
 
 for _, row in events.iterrows():
     msg = row["message"]
-    if any(key in msg for key in ["ENTER:", "Trying", "failed", "DUT_POWER_ON", "AMPERE_MODE"]):
+    if any(key in msg for key in [
+        "ENTER:",
+        "Trying",
+        "failed",
+        "DUT_POWER_ON",
+        "AMPERE_MODE",
+        "DUT_OUTPUT_SWITCH",
+    ]):
         x = row["t_sample_s"]
         plt.axvline(x, linestyle="--", linewidth=0.8)
         plt.text(x, np.nanmax(samples), msg[-50:], rotation=90, fontsize=8)

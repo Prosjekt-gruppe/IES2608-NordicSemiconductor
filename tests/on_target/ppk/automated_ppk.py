@@ -146,6 +146,15 @@ def parse_args():
         ),
     )
     parser.add_argument(
+        "--disable-output-switch",
+        action="store_true",
+        help=(
+            "Do not enable the PPK2 DUT output switch. In ampere mode this "
+            "normally must stay enabled because it closes the VIN-to-VOUT "
+            "measurement path."
+        ),
+    )
+    parser.add_argument(
         "--source-voltage-mv",
         type=int,
         default=SOURCE_VOLTAGE_MV,
@@ -286,11 +295,14 @@ def main() -> None:
     time.sleep(1.0)
 
     t_ns, sample_idx = rec_state.snapshot()
-    if args.mode == "source":
+    if args.disable_output_switch:
+        event_file.write(f"{t_ns},{sample_idx},system,DUT_OUTPUT_SWITCH_DISABLED\n")
+    elif args.mode == "source":
         ppk2.toggle_DUT_power("ON")
         event_file.write(f"{t_ns},{sample_idx},system,DUT_POWER_ON\n")
     else:
-        event_file.write(f"{t_ns},{sample_idx},system,AMPERE_MODE_EXTERNAL_POWER\n")
+        ppk2.toggle_DUT_power("ON")
+        event_file.write(f"{t_ns},{sample_idx},system,AMPERE_MODE_PASS_THROUGH_ON\n")
     event_file.flush()
 
     
