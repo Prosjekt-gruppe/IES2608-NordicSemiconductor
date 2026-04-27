@@ -9,6 +9,7 @@ import matplotlib.pyplot as plt
 
 ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
 TRANSITION_RE = re.compile(r"TRANSITION:\s*(STATE_[A-Z0-9_]+)\s*->\s*(STATE_[A-Z0-9_]+)")
+STATE_CHANGE_RE = re.compile(r"STATE_CHANGE:\s*(STATE_[A-Z0-9_]+)\s*->\s*(STATE_[A-Z0-9_]+)")
 FIELD_LOG_STATE_RE = re.compile(
     r"Field log state #\d+:\s*(STATE_[A-Z0-9_]+)\s*->\s*(STATE_[A-Z0-9_]+)"
 )
@@ -62,31 +63,37 @@ def transition_label(from_state: str, to_state: str) -> str:
     return f"{state_label(from_state)} -> {state_label(to_state)}"
 
 
-def event_label(message: str):
-    match = TRANSITION_RE.search(message) or FIELD_LOG_STATE_RE.search(message)
+def event_marker(message: str):
+    match = (
+        STATE_CHANGE_RE.search(message)
+        or TRANSITION_RE.search(message)
+        or FIELD_LOG_STATE_RE.search(message)
+    )
     if match:
-        return transition_label(match.group(1), match.group(2))
+        from_state = match.group(1)
+        to_state = match.group(2)
+        return transition_label(from_state, to_state), f"{from_state}->{to_state}"
 
     if "Trying to connect NTN" in message:
-        return "Starting NTN"
+        return "Starting NTN", "trying-ntn"
     if "ntn registered ok" in message:
-        return "Switched to NTN"
+        return "Switched to NTN", "ntn-registered"
     if "switch: sending XSYSTEMMODE NTN" in message:
-        return "Modem mode NTN"
+        return "Modem mode NTN", "modem-mode-ntn"
     if "switch: sending XSYSTEMMODE TN" in message:
-        return "Modem mode LTE-M"
+        return "Modem mode LTE-M", "modem-mode-tn"
     if "LTE probe: TN good" in message:
-        return "LTE-M recovered"
+        return "LTE-M recovered", "lte-recovered"
     if "LTE probe: TN still bad" in message:
-        return "Stay on NTN"
+        return "Stay on NTN", "stay-ntn"
     if "DUT_POWER_ON" in message:
-        return "DUT power on"
+        return "DUT power on", "dut-power-on"
     if "AMPERE_MODE_PASS_THROUGH_ON" in message:
-        return "Measurement start"
+        return "Measurement start", "measurement-start"
     if "DUT_OUTPUT_SWITCH_DISABLED" in message:
-        return "Output switch disabled"
+        return "Output switch disabled", "output-switch-disabled"
 
-    return None
+    return None, None
 
 
 SAMPLE_RATE_HZ = 100_000
@@ -111,12 +118,19 @@ plt.plot(t, samples, linewidth=0.8)
 
 plot_top = np.nanmax(samples) if len(samples) else 0
 markers = []
+last_marker_by_key = {}
 
 for _, row in events.iterrows():
     msg = row["message"]
-    label = event_label(msg)
+    label, key = event_marker(msg)
     if label:
         x = row["t_sample_s"]
+        previous_x = last_marker_by_key.get(key)
+
+        if previous_x is not None and abs(x - previous_x) <= 1.0:
+            continue
+
+        last_marker_by_key[key] = x
         markers.append((x, label, msg))
         plt.axvline(x, linestyle="--", linewidth=0.8)
         plt.text(

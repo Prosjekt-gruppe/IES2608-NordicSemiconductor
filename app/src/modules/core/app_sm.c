@@ -186,8 +186,58 @@ static uint8_t retry_inc(struct app_ctx *ctx, enum rat rat)
     return 0;
 }
 
+static const char *app_state_name(enum app_state state)
+{
+    switch (state) {
+    case STATE_BOOT:
+        return "STATE_BOOT";
+    case STATE_IDLE:
+        return "STATE_IDLE";
+    case STATE_GNSS_ACQUIRE:
+        return "STATE_GNSS_ACQUIRE";
+    case STATE_NTN_CONNECTING:
+        return "STATE_NTN_CONNECTING";
+    case STATE_NTN_CONNECTED:
+        return "STATE_NTN_CONNECTED";
+    case STATE_LTEM_CONNECTING:
+        return "STATE_LTEM_CONNECTING";
+    case STATE_LTEM_CONNECTED:
+        return "STATE_LTEM_CONNECTED";
+    case STATE_CLOUD_CONNECTING:
+        return "STATE_CLOUD_CONNECTING";
+    case STATE_LTE_LOCATION:
+        return "STATE_LTE_LOCATION";
+    case STATE_LTE_PROBE:
+        return "STATE_LTE_PROBE";
+    case STATE_BACKOFF:
+        return "STATE_BACKOFF";
+    default:
+        return "STATE_UNKNOWN";
+    }
+}
+
+static const char *rat_name(enum rat rat)
+{
+    switch (rat) {
+    case RAT_LTEM:
+        return "LTE-M";
+    case RAT_NTN:
+        return "NTN";
+    default:
+        return "UNKNOWN";
+    }
+}
+
 static void transition_to_state(struct app_ctx *ctx, enum app_state next_state)
 {
+    LOG_WRN("STATE_CHANGE: %s -> %s reason=%s active_rat=%s next_rat=%s rsrp=%d",
+            app_state_name(ctx->state),
+            app_state_name(next_state),
+            app_evt_name(ctx->ev.type),
+            rat_name(ctx->active_rat),
+            rat_name(ctx->next_rat),
+            ctx->rsrp_dbm);
+
 #if defined(CONFIG_APP_FIELD_LOG)
     field_log_note_state_change(ctx->state, next_state, ctx->ev.type, ctx);
 #endif
