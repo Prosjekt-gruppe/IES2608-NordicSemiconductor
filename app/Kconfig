@@ -75,6 +75,15 @@ config APP_MODEM_RSRP_WEAK_SAMPLE_COUNT
       threshold needed before the modem service requests NTN fallback, even if
       the signal is not actively dropping anymore.
 
+config APP_NTN_PROBE_INTERVAL_SEC
+    int "NTN LTE-M probe interval in seconds"
+    default 60
+    range 0 86400
+    help
+      While connected over NTN, periodically switch back to TN long enough
+      to measure LTE-M RSRP and test the LTE data path. Set to 0 to disable
+      automatic probing while on NTN.
+
 config APP_SENSOR_ACCEL_DEMO
     bool "Enable accelerometer demo"
     default y if BOARD_THINGY91X_NRF9151_NS

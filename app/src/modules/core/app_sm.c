@@ -852,18 +852,13 @@ static void ntn_timer_handler(struct k_timer *timer)
 
 static void ntn_connected_entry(void *obj)
 {
-#if defined(CONFIG_APP_CORE_SM_PROBE_TEST)
     struct app_ctx *ctx = obj;
-#else
-    ARG_UNUSED(obj);
-#endif
 
-/* force lte probe check after 50 sec*/
-#if defined(CONFIG_APP_CORE_SM_PROBE_TEST)
-    LOG_INF("Starting ntn connected timer");
-    int32_t delay_ms = 50000;
+/* Periodically re-check LTE-M while on NTN so fallback is reversible. */
+#if CONFIG_APP_NTN_PROBE_INTERVAL_SEC > 0
+    LOG_INF("Starting NTN probe timer: %d s", CONFIG_APP_NTN_PROBE_INTERVAL_SEC);
     k_timer_start(&ctx->ntn_timer,
-                  K_MSEC(delay_ms),
+                  K_SECONDS(CONFIG_APP_NTN_PROBE_INTERVAL_SEC),
                   K_NO_WAIT);
 #endif
 
@@ -908,13 +903,12 @@ static enum smf_state_result ntn_connected_run(void *obj)
 
 static void ntn_connected_exit(void *obj)
 {
-    LOG_INF("ntn connected exit");
-#if defined(CONFIG_APP_CORE_SM_PROBE_TEST)
     struct app_ctx *ctx = obj;
 
+    LOG_INF("ntn connected exit");
+
+#if CONFIG_APP_NTN_PROBE_INTERVAL_SEC > 0
     k_timer_stop(&ctx->ntn_timer);
-#else
-    ARG_UNUSED(obj);
 #endif
 }
 
