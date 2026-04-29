@@ -104,7 +104,7 @@ rec_state = RecordingState(
 
 DATA_DIR = "data/raw"
 PPK2_PORT = "/dev/serial/by-id/usb-Nordic_Semiconductor_PPK2_CB6017A1DC4B-if01"
-UART_PORT = "/dev/serial/by-id/usb-SEGGER_J-Link_001052041270-if00"
+UART_PORT = "/dev/serial/by-id/usb-Nordic_Semiconductor_Thingy:91_X_UART_THINGY91X_E50FC7F3734-if01"
 UART_BAUDRATE = 115200
 SOURCE_VOLTAGE_MV = 3300
 MEASUREMENT_MODE = "ampere"
