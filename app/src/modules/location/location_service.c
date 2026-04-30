@@ -51,6 +51,11 @@ static void location_event_handler(const struct location_event_data *event_data)
 
     switch (event_data->id){
     case LOCATION_EVT_LOCATION:
+        if (event_data == NULL) {
+            LOG_ERR("location_event_handler: NULL event_data");
+            return;
+        }
+
         LOG_INF("LTE location success: lat=%f lon=%f acc=%f m",
             (double)event_data->location.latitude,
             (double)event_data->location.longitude,
@@ -58,14 +63,11 @@ static void location_event_handler(const struct location_event_data *event_data)
 
         err = publish_lte_loc_ok(&event_data->location); 
         if (err) {
-            LOG_ERR("publish_lte_loc_ok err=%d");
+            LOG_ERR("publish_lte_loc_ok error: err=%d", err);
             return;
         }
-        if (event_data == NULL) {
-            LOG_ERR("location_event_handler: NULL event_data");
-            return;
-        }
-        LOG_INF("Published EVT_lOC_OK");
+
+        LOG_INF("Published EVT_LTE_LOC_OK");
 
 #if defined(CONFIG_APP_FIELD_LOG)
         field_log_note_location(FIELD_LOG_LOCATION_LTE,
@@ -75,6 +77,7 @@ static void location_event_handler(const struct location_event_data *event_data)
 #endif
 
         LOG_INF("location_event_handler entered, id=%d", event_data->id);
+        break;
 
     case LOCATION_EVT_TIMEOUT:
         LOG_WRN("LTE location timeout");

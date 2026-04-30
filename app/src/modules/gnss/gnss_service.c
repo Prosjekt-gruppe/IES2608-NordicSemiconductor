@@ -39,6 +39,7 @@ static bool gnss_initialized;
 static bool gnss_running;
 static bool assisted_start_in_progress;
 static bool agnss_ready;
+static bool fix_published;
 
 /* forward declarations */
 static int publish_timeout(void);
@@ -92,6 +93,10 @@ static int publish_error(int err)
 
 static int publish_fix(const struct nrf_modem_gnss_pvt_data_frame *pvt, int64_t ttff_ms)
 {
+    if (!gnss_running) {
+        return -EAGAIN;
+    }
+
     struct app_event ev = {
         .type = EVT_GNSS_FIX,
     };
@@ -122,7 +127,8 @@ static int handle_error(int err)
 {
     LOG_ERR("GNSS service error, err=%d", err);
     (void)publish_error(err);
-    (void)publish_error_as_timeout(err);
+    /* instead of sending error status double */
+    (void)publish_timeout();
     return err;
 }
 
@@ -163,7 +169,10 @@ static void gnss_pvt_work_handler(struct k_work *work)
 {
     ARG_UNUSED(work);
 
-    uint8_t satellites;
+    if (fix_published || !gnss_running) {
+        return;
+    }
+
     int64_t ttff_ms = -1;
     int err = nrf_modem_gnss_read(&pvt_data,
                                   sizeof(pvt_data),
@@ -175,19 +184,20 @@ static void gnss_pvt_work_handler(struct k_work *work)
         return;
     }
 
-    satellites = count_tracked_satellites(&pvt_data);
+    uint8_t satellites = count_tracked_satellites(&pvt_data);
     LOG_INF("GNSS search active, satellites tracked: %u", satellites);
 
     if ((pvt_data.flags & NRF_MODEM_GNSS_PVT_FLAG_FIX_VALID) == 0U) {
         return;
     }
 
-    if (!first_fix) {
-        ttff_ms = k_uptime_get() - gnss_start_time;
-        first_fix = true;
-        LOG_INF("Time to first fix: %lld s", (long long)(ttff_ms / 1000));
-    }
+    fix_published = true;
+    (void)gnss_service_cancel_timeout();
 
+    ttff_ms = k_uptime_get() - gnss_start_time;
+    first_fix = true;
+
+    LOG_INF("Time to first fix: %lld s", (long long)(ttff_ms / 1000));
     log_fix_data(&pvt_data);
 
 #if defined(CONFIG_APP_FIELD_LOG)
@@ -201,8 +211,8 @@ static void gnss_pvt_work_handler(struct k_work *work)
     LOG_INF("published GNSS fix status err=%d", err);
 }
 
-/* GNSS modem events */
 
+/* GNSS modem events */
 static void gnss_event_handler(int event)
 {
     int err;
@@ -236,10 +246,11 @@ static void gnss_event_handler(int event)
 }
 
 /* public init */
-
 int gnss_service_init(void)
 {
     int err;
+
+    fix_published = false;
 
     first_fix = false;
     gnss_start_time = 0;
@@ -327,6 +338,7 @@ static int gnss_prepare_agnss(void)
 
 int gnss_service_start_assisted(int32_t timeout_sec)
 {
+    fix_published = false;
     int err;
 
     if (!gnss_initialized) {
@@ -388,10 +400,11 @@ void gnss_notify_agnss_ready(void)
     agnss_ready = true;
     assisted_start_in_progress = false;
 
-    (void)gnss_service_cancel_timeout();
-
     LOG_INF("Restarting GNSS after A-GNSS");
     gnss_restart_with_agnss();
+
+    /* restart timeout */
+    (void)gnss_service_start_timeout(30);
 }
 
 int gnss_service_start(void)

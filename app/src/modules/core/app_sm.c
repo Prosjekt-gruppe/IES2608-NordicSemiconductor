@@ -487,12 +487,12 @@ static enum smf_state_result ltem_connected_run(void *obj)
         transition_to_state(ctx, STATE_CLOUD_CONNECTING); 
         return SMF_EVENT_HANDLED;
     
-        case EVT_START_LTE_LOC:
+    case EVT_START_LTE_LOC:
         LOG_INF("LTEM_CONNECTED: starting LTE location");
         transition_to_state(ctx, STATE_LTE_LOCATION);
         return SMF_EVENT_HANDLED;
         
-        case EVT_START_GNSS:
+    case EVT_START_GNSS:
         LOG_INF("LTEM_CONNECTED: starting GNSS acquire");
         transition_to_state(ctx, STATE_GNSS_ACQUIRE);
         return SMF_EVENT_HANDLED; 
@@ -577,11 +577,13 @@ static enum smf_state_result cloud_connecting_run(void *obj)
             return SMF_EVENT_HANDLED;
 
         case EVT_CLOUD_DISCONNECTED:
-            ctx->cloud_connected = false; 
+            ctx->cloud_connected = false;
 
             LOG_WRN("Cloud disconnected while connecting");
             LOG_WRN("TRANSITION: STATE_CLOUD -> STATE_BACKOFF");
-            transition_to_state(ctx, STATE_BACKOFF);
+            /* not sure if this backoff needs to handle this hmm */
+            //transition_to_state(ctx, STATE_BACKOFF);
+            transition_to_state(ctx, STATE_LTEM_CONNECTED);
             return SMF_EVENT_HANDLED;
 
         default:
