@@ -518,10 +518,6 @@ static void ltem_connected_exit(void *obj)
     struct app_ctx *ctx = obj;
     LOG_INF("ltem timer stop");
     k_timer_stop(&ctx->lte_timer);
-#else
-    struct app_ctx *ctx = obj;
-    LOG_INF("lte timer stop");
-    k_timer_stop(&ctx->lte_timer);
 #endif
 
     err = rsrp_service_stop();
