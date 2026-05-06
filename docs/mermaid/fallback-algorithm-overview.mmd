@@ -1,0 +1,18 @@
+flowchart TD
+    A[LTE-M Connected<br/>Normal operation] 
+        -->|LTE degrades <br/> or rsrp <= threshold| B[Backoff]
+
+    B --> C[Switch to NTN<br/>Fallback active]
+
+    C -->|"`Probe timer expired -> configure modem: <br/> CFUN=45 (preserve ctx)  <br/> SYSTEMMODE=1,0,0,0,0 <br/> CFUN=1`"| D["`Probe LTE-M <br/> (Find average of *n* RSRP samples)`"]
+
+    D --> E{"`avg_RSRP >= threshold<br/>+ hysteresis`"}
+
+    E -->|"`No <br/> CFUN=45 <br/> SYSTEMMODE=0,0,0,0,1 <br/> CFUN=1`"| C
+
+    E -->|Yes| F[Verify connectivity<br/>UDP test]
+
+    F --> G{Test OK}
+
+    G -->|No<br/> CFUN=45 <br/> SYSTEMMODE=0,0,0,0,1 <br/> CFUN=1| C
+    G -->|Yes| A

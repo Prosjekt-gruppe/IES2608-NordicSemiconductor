@@ -379,6 +379,13 @@ static void ltem_connected_entry(void *obj)
 #if defined(CONFIG_APP_CORE_SM_PROBE_TEST)
     LOG_INF("ltem timer start");
     k_timer_start(&ctx->lte_timer, K_MSEC(3000), K_NO_WAIT);
+/*
+#else
+    /* just for test remove later */
+    LOG_INF("lte timer force bad rsrp");
+    /* allow cloud and gnss and those to setup ok */
+    k_timer_start(&ctx->lte_timer, K_MSEC(60000), K_NO_WAIT);
+*/
 #endif
     
     // debug
@@ -448,6 +455,26 @@ static enum smf_state_result ltem_connected_run(void *obj)
         LOG_WRN("LTE poor, consider switching RAT");
         ctx->next_rat = RAT_NTN;
 
+        /* bad patch make better solution later if this works */
+        if (lte_service_is_connected()) {
+            
+            /* try disconnecting all services before NTN */
+            int err = location_service_stop();
+            if (err) {
+                LOG_ERR("Failed to stop location service: err=%d", err);
+            }
+            
+            err = cloud_service_disconnect();
+            if (err) {
+                LOG_ERR("Failed to disconnect cloud: err=%d", err);
+            }
+
+            err = lte_service_disconnect();
+            if (err) {
+                LOG_ERR("Failed to disconnect LTE: err=%d", err);
+            }
+        }
+
         /* go to backoff */
         LOG_WRN("TRANSITION: STATE_LTEM_CONNECTED -> STATE_BACKOFF");
         transition_to_state(ctx, STATE_BACKOFF);
@@ -458,17 +485,17 @@ static enum smf_state_result ltem_connected_run(void *obj)
         transition_to_state(ctx, STATE_CLOUD_CONNECTING); 
         return SMF_EVENT_HANDLED;
     
-/* force EVT_LTE_POOR (usually should be disabled) */
     case EVT_START_LTE_LOC:
         LOG_INF("LTEM_CONNECTED: starting LTE location");
         transition_to_state(ctx, STATE_LTE_LOCATION);
         return SMF_EVENT_HANDLED;
-
+        
     case EVT_START_GNSS:
         LOG_INF("LTEM_CONNECTED: starting GNSS acquire");
         transition_to_state(ctx, STATE_GNSS_ACQUIRE);
         return SMF_EVENT_HANDLED; 
-
+        
+/* force EVT_LTE_POOR (usually should be disabled) */
 #if defined(CONFIG_APP_CORE_SM_PROBE_TEST)
     case EVT_TIMEOUT:
         ctx->next_rat = RAT_NTN;
@@ -485,16 +512,21 @@ static enum smf_state_result ltem_connected_run(void *obj)
 static void ltem_connected_exit(void *obj)
 {
     ARG_UNUSED(obj);
+    int err;
 
 #if defined(CONFIG_APP_CORE_SM_PROBE_TEST)
     struct app_ctx *ctx = obj;
     LOG_INF("ltem timer stop");
     k_timer_stop(&ctx->lte_timer);
 #endif
-   
+
+    err = rsrp_service_stop();
+    if (err) {
+        LOG_ERR("rsrp_service_stop failed: err=%d", err);
+    }
+
     LOG_WRN("EXIT: STATE_LTEM_CONNECTED");
 }
-
 
 
 static void cloud_connecting_entry(void *obj)
@@ -508,7 +540,7 @@ static void cloud_connecting_entry(void *obj)
 
     err = cloud_service_connect_async();
     if (err){
-        LOG_ERR("cloud_service_connect_async err=%d", err); 
+        LOG_ERR("cloud_service_connect_async err=%d", err);
         (void)app_event_publish_type(EVT_CLOUD_FAIL);
         return;
     }
@@ -539,11 +571,13 @@ static enum smf_state_result cloud_connecting_run(void *obj)
             return SMF_EVENT_HANDLED;
 
         case EVT_CLOUD_DISCONNECTED:
-            ctx->cloud_connected = false; 
+            ctx->cloud_connected = false;
 
             LOG_WRN("Cloud disconnected while connecting");
             LOG_WRN("TRANSITION: STATE_CLOUD -> STATE_BACKOFF");
-            transition_to_state(ctx, STATE_BACKOFF);
+            /* not sure if this backoff needs to handle this hmm */
+            //transition_to_state(ctx, STATE_BACKOFF);
+            transition_to_state(ctx, STATE_LTEM_CONNECTED);
             return SMF_EVENT_HANDLED;
 
         default:
@@ -767,7 +801,7 @@ static enum smf_state_result ntn_connecting_run(void *obj)
         LOG_INF("ntn connect failed/timeout");
         ctx->pdn_up=false;
 
-        /* increment NTN attempt */
+        /* increment NTN connect attempts */
         uint8_t attempts = retry_inc(ctx, RAT_NTN);
 
         if (attempts >= CONFIG_APP_MAX_NTN_RETRIES) {
@@ -802,20 +836,16 @@ static void ntn_timer_handler(struct k_timer *timer)
 
 static void ntn_connected_entry(void *obj)
 {
-#if defined(CONFIG_APP_CORE_SM_PROBE_TEST)
     struct app_ctx *ctx = obj;
-#else
-    ARG_UNUSED(obj);
-#endif
 
-/* force lte probe check after 50 sec*/
-#if defined(CONFIG_APP_CORE_SM_PROBE_TEST)
-    LOG_INF("Starting ntn connected timer");
-    int32_t delay_ms = 50000;
+/* force lte probe check after 5s for test change to 50 or something later */
+//#if defined(CONFIG_APP_CORE_SM_PROBE_TEST)
+    LOG_INF("Starting ntn probe timer");
+    int32_t delay_ms = 5000;
     k_timer_start(&ctx->ntn_timer,
                   K_MSEC(delay_ms),
                   K_NO_WAIT);
-#endif
+//#endif
 
     LOG_INF("(%s) finished entering ntn connected", __func__);
 }
@@ -905,11 +935,8 @@ static void __maybe_unused handle_gnss_status(struct app_ctx *ctx,
     
 static void lte_probe_entry(void *obj)
 {
-    //ARG_UNUSED(obj);
     int err;
-
     struct app_ctx *ctx = obj;
-    
     
     /* enable lte-service probe event on rsrp */
     lte_service_set_probe_pending(true);
@@ -948,7 +975,7 @@ static enum smf_state_result lte_probe_run(void *obj)
     case EVT_LTE_GOOD:
         LOG_INF("LTE probe: TN good -> UDP test");
         
-        /* send udp */
+        /* send udp test */
         err = modem_service_udp_send_test();
         
         if (err) {
@@ -964,13 +991,20 @@ static enum smf_state_result lte_probe_run(void *obj)
     
         /* should probably go to LTEM_CONNECTING/CONNECTED but for this test its ok */
         ctx->next_rat = RAT_LTEM;
+
+        /*
+         * TODO: Might have to do a check here to see if context 
+         *       was preserved successfully, If not it might have
+         *       to reconnect to STATE_LTEM_CONNECTING again.
+         */
+
         transition_to_state(ctx, STATE_LTEM_CONNECTED);
         return SMF_EVENT_HANDLED;
 
     case EVT_TN_READY_FOR_PROBE:
         LOG_INF("something");
 
-        /* start rsrp probe */
+        /* start rsrp probe with n attempts */
         err = rsrp_service_start_probe(3);
         if (err < 0) {
             LOG_ERR("rsrp_service_start_probe failed: %d", err);
@@ -985,7 +1019,7 @@ static enum smf_state_result lte_probe_run(void *obj)
     }
 
 }
-    
+
     
 static void backoff_timer_handler(struct k_timer *timer)
 {
