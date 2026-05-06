@@ -1,0 +1,22 @@
+flowchart TD 
+    A[STATE_LTEM_CONNECTED<br/>LTE-M active<br/>RSRP monitoring] 
+        -->|EVT_LTE_POOR| B[STATE_BACKOFF<br/>Wait before switching RAT]
+
+    B -->|Timeout| C[STATE_NTN_CONNECTING<br/>Attempt NTN connection]
+
+    C -->|Connected PDN_UP / REG_OK| D[STATE_NTN_CONNECTED<br/>Fallback active]
+
+    D -->|NTN connected timer expires| E[STATE_LTE_PROBE<br/>Switch modem to TN -> <br/> CFUN=45 <br/> XSYSTEMMODE=1,0,0,0,0 <br/> CFUN=1]
+
+    E --> F[Collect n RSRP samples<br/>]
+
+    F --> G{avg_RSRP > threshold+hysteresis}
+
+    G -->|Yes| H[Run UDP test over LTE-M]
+
+    H --> I{UDP test successful?}
+
+    I -->|No| D
+    I -->|Yes| A
+
+    G -->|No| D

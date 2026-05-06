@@ -383,11 +383,13 @@ static void ltem_connected_entry(void *obj)
 #if defined(CONFIG_APP_CORE_SM_PROBE_TEST)
     LOG_INF("ltem timer start");
     k_timer_start(&ctx->lte_timer, K_MSEC(3000), K_NO_WAIT);
+/*
 #else
     /* just for test remove later */
     LOG_INF("lte timer force bad rsrp");
     /* allow cloud and gnss and those to setup ok */
     k_timer_start(&ctx->lte_timer, K_MSEC(60000), K_NO_WAIT);
+*/
 #endif
     
     // debug
