@@ -328,11 +328,7 @@ static void ltem_timer_handler(struct k_timer *timer)
     ARG_UNUSED(timer);
 
     struct app_event ev = {
-#if defined(CONFIG_APP_CORE_SM_PROBE_TEST)
         .type = EVT_TIMEOUT
-#else
-        .type = EVT_LTE_POOR
-#endif
     };
 
     (void)app_event_put(&ev, K_NO_WAIT);
