@@ -40,6 +40,14 @@ union app_sm_msg {
 static void boot_entry(void *obj);
 static enum smf_state_result boot_run(void *obj);
 
+static void disconnected_entry(void *obj);
+static enum smf_state_result disconnected_run(void *obj);
+static void disconnected_exit(void *obj);
+
+static void connected_entry(void *obj);
+static enum smf_state_result connected_run(void *obj);
+static void connected_exit(void *obj);
+
 static void ltem_connecting_entry(void *obj); 
 static enum smf_state_result ltem_connecting_run(void *obj);
 
@@ -106,75 +114,94 @@ static const struct smf_state states[] = {
         running_exit,
         NULL,
         NULL
-    ),  /* running child states */
+    ),
+    /* disconnected parent state */
+    [STATE_DISCONNECTED] = SMF_CREATE_STATE(
+        disconnected_entry,
+        disconnected_run,
+        disconnected_exit,
+        &states[STATE_RUNNING],
+        &states[STATE_LTEM_CONNECTING]
+    ),
+        /* disconnected  child states */
+        [STATE_BACKOFF] = SMF_CREATE_STATE(
+            backoff_entry,
+            backoff_run,
+            backoff_exit,
+            &states[STATE_DISCONNECTED],
+            NULL
+        ),
         [STATE_LTEM_CONNECTING] = SMF_CREATE_STATE(
-            ltem_connecting_entry, 
-            ltem_connecting_run, 
+            ltem_connecting_entry,
+            ltem_connecting_run,
             NULL,
-            &states[STATE_RUNNING],
-            NULL
-        ),
-        [STATE_LTEM_CONNECTED] = SMF_CREATE_STATE(
-            ltem_connected_entry,
-            ltem_connected_run,
-            ltem_connected_exit,
-            &states[STATE_RUNNING],
-            NULL
-        ),
-        [STATE_CLOUD_CONNECTING] = SMF_CREATE_STATE(
-            cloud_connecting_entry,
-            cloud_connecting_run,
-            cloud_connecting_exit,
-            &states[STATE_RUNNING],
-            NULL
-        ),
-        [STATE_LTE_LOCATION] = SMF_CREATE_STATE(
-            lte_location_entry,
-            lte_location_run,
-            lte_location_exit,
-            &states[STATE_RUNNING],
-            NULL
-        ),
-        [STATE_GNSS_ACQUIRE] = SMF_CREATE_STATE(
-            gnss_acquire_entry,
-            gnss_acquire_run,
-            gnss_acquire_exit,
-            &states[STATE_RUNNING],
+            &states[STATE_DISCONNECTED],
             NULL
         ),
         [STATE_NTN_CONNECTING] = SMF_CREATE_STATE(
             ntn_connecting_entry,
             ntn_connecting_run,
             ntn_connecting_exit,
-            &states[STATE_RUNNING],
+            &states[STATE_DISCONNECTED],
+            NULL
+        ),
+    /* connecte parent state */
+    [STATE_CONNECTED] = SMF_CREATE_STATE(
+        connected_entry,
+        connected_run,
+        connected_exit,
+        &states[STATE_RUNNING],
+        &states[STATE_LTEM_CONNECTED]
+    ),
+        /* connected child states */
+        [STATE_LTEM_CONNECTED] = SMF_CREATE_STATE(
+            ltem_connected_entry,
+            ltem_connected_run,
+            ltem_connected_exit,
+            &states[STATE_CONNECTED],
+            NULL
+        ),
+        [STATE_CLOUD_CONNECTING] = SMF_CREATE_STATE(
+            cloud_connecting_entry,
+            cloud_connecting_run,
+            cloud_connecting_exit,
+            &states[STATE_CONNECTED],
+            NULL
+        ),
+
+        [STATE_LTE_LOCATION] = SMF_CREATE_STATE(
+            lte_location_entry,
+            lte_location_run,
+            lte_location_exit,
+            &states[STATE_CONNECTED],
+            NULL
+        ),
+        [STATE_GNSS_ACQUIRE] = SMF_CREATE_STATE(
+            gnss_acquire_entry,
+            gnss_acquire_run,
+            gnss_acquire_exit,
+            &states[STATE_CONNECTED],
             NULL
         ),
         [STATE_NTN_CONNECTED] = SMF_CREATE_STATE(
             ntn_connected_entry,
             ntn_connected_run,
             ntn_connected_exit,
-            &states[STATE_RUNNING],
+            &states[STATE_CONNECTED],
             NULL
         ),
         [STATE_LTE_PROBE] = SMF_CREATE_STATE(
-            lte_probe_entry, 
+            lte_probe_entry,
             lte_probe_run,
-            NULL, 
-            &states[STATE_RUNNING],
+            NULL,
+            &states[STATE_CONNECTED],
             NULL
         ),
         [STATE_IDLE] = SMF_CREATE_STATE(
             NULL,
             NULL,
             NULL,
-            &states[STATE_RUNNING],
-            NULL
-        ),
-        [STATE_BACKOFF] = SMF_CREATE_STATE(
-            backoff_entry,
-            backoff_run,
-            backoff_exit,
-            &states[STATE_RUNNING],
+            &states[STATE_CONNECTED],
             NULL
         ),
 };
@@ -287,7 +314,7 @@ static enum smf_state_result boot_run(void *obj)
         if (IS_ENABLED(CONFIG_APP_DEBUG_BOOT)) {
             LOG_INF("DEBUG: Halting in STATE_BOOT after initialization");
         } else {
-            transition_to_state(ctx, STATE_LTEM_CONNECTING);
+            transition_to_state(ctx, STATE_DISCONNECTED);
         }
     }
     return SMF_EVENT_HANDLED;
@@ -320,6 +347,109 @@ static void running_exit(void *obj)
     LOG_WRN("EXIT: STATE_RUNNING");
 }
 
+/* disconnected parent state*/
+static void disconnected_entry(void *obj)
+{
+    struct app_ctx *ctx = obj;
+
+    LOG_WRN("ENTER: STATE_DISCONNECTED");
+
+    ctx->pdn_up = false;
+    ctx->lte_connected = false;
+    ctx->cloud_connected = false;
+
+    /*
+     * make sure to dont force modem disconnect here unless every child expects it
+     */
+}
+
+static enum smf_state_result disconnected_run(void *obj)
+{
+    struct app_ctx *ctx = obj;
+
+    switch (ctx->ev.type) {
+    case EVT_CLOUD_DISCONNECTED:
+        ctx->cloud_connected = false;
+        return SMF_EVENT_HANDLED;
+
+    case EVT_PDN_DOWN:
+        ctx->pdn_up = false;
+        return SMF_EVENT_HANDLED;
+
+    default:
+        return SMF_EVENT_HANDLED;
+    }
+}
+
+static void disconnected_exit(void *obj)
+{
+    ARG_UNUSED(obj);
+    LOG_WRN("EXIT: STATE_DISCONNECTED");
+}
+
+
+/* connected parent state */
+static void connected_entry(void *obj)
+{
+    struct app_ctx *ctx = obj;
+
+    LOG_WRN("ENTER: STATE_CONNECTED");
+
+    /*
+     * child states decide RAT_LTEM vs RAT_NTN
+     */
+}
+
+
+static enum smf_state_result connected_run(void *obj)
+{
+    struct app_ctx *ctx = obj;
+
+    switch (ctx->ev.type) {
+    case EVT_CLOUD_DISCONNECTED:
+        ctx->cloud_connected = false;
+        LOG_WRN("Cloud disconnected in CONNECTED parent");
+        return SMF_EVENT_HANDLED;
+
+    case EVT_PDN_DOWN:
+    case EVT_REG_FAIL:
+        LOG_WRN("Network lost in CONNECTED parent -> BACKOFF");
+
+        ctx->pdn_up = false;
+        ctx->cloud_connected = false;
+
+        if (ctx->active_rat == RAT_LTEM) {
+            ctx->next_rat = RAT_NTN;
+        } else {
+            ctx->next_rat = RAT_LTEM;
+        }
+
+        transition_to_state(ctx, STATE_BACKOFF);
+        return SMF_EVENT_HANDLED;
+
+    case EVT_RSRP_UPDATE:
+        ctx->rsrp_dbm = ctx->ev.meas.rsrp_dbm;
+        LOG_INF("Network quality sample / RSRP update: %d dBm", ctx->rsrp_dbm);
+        return SMF_EVENT_HANDLED;
+
+    default:
+        return SMF_EVENT_HANDLED;
+    }
+}
+
+static void connected_exit(void *obj)
+{
+    struct app_ctx *ctx = obj;
+
+    LOG_WRN("EXIT: STATE_CONNECTED");
+
+    k_timer_stop(&ctx->ntn_timer);
+    k_timer_stop(&ctx->lte_timer);
+
+    (void)rsrp_service_stop();
+}
+
+
 static void ltem_connecting_entry(void *obj)
 {
     ARG_UNUSED(obj);
@@ -342,21 +472,20 @@ static enum smf_state_result ltem_connecting_run(void *obj)
     struct app_ctx *ctx = obj;
 
     switch (ctx->ev.type) {
-        case EVT_REG_OK: {
-            ctx->active_rat = RAT_LTEM;
-            ctx->lte_connected = true; 
-            ctx->last_done = STEP_NONE;
+    case EVT_REG_OK:
+        ctx->active_rat = RAT_LTEM;
+        ctx->lte_connected = true;
+        ctx->pdn_up = true;
+        ctx->last_done = STEP_NONE;
 
-            LOG_WRN("TRANSITION: STATE_LTEM_CONNECTING -> STATE_LTEM_CONNECTED");
-            transition_to_state(ctx, STATE_LTEM_CONNECTED);
-            return SMF_EVENT_HANDLED;
-        }
+        transition_to_state(ctx, STATE_LTEM_CONNECTED);
+        return SMF_EVENT_HANDLED;
 
-        case EVT_REG_FAIL:
-            ctx->next_rat = RAT_NTN;
-            LOG_WRN("TRANSITION: STATE_LTEM_CONNECTING -> STATE_BACKOFF");
-            transition_to_state(ctx, STATE_BACKOFF);
-            return SMF_EVENT_HANDLED;
+    case EVT_REG_FAIL:
+        ctx->next_rat = RAT_NTN;
+        LOG_WRN("TRANSITION: STATE_LTEM_CONNECTING -> STATE_BACKOFF");
+        transition_to_state(ctx, STATE_BACKOFF);
+        return SMF_EVENT_HANDLED;
 
         default:
             return SMF_EVENT_HANDLED;
