@@ -94,7 +94,7 @@ static int ntn_service_prepare(struct app_ctx *ctx)
         }
     }
 
-    /* TODO: Keep system mode selection close to connect while LTE-M remains active elsewhere. */
+    /* TODO: Keep system mode selection close to connect while LTE-M sessions share the modem; move once RAT switching is isolated. */
     err = lte_lc_system_mode_set(LTE_LC_SYSTEM_MODE_NTN_NBIOT,
                                  LTE_LC_SYSTEM_MODE_PREFER_AUTO);
     

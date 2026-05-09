@@ -322,7 +322,7 @@ static void disconnected_entry(void *obj)
     struct app_ctx *ctx = obj;
 
     if (!modem_profiles_ready(ctx)) {
-        /* Connect entries will retry and surface failures. */
+        LOG_WRN("Modem profiles not ready; connect attempts will retry");
         return;
     }
 }
