@@ -37,8 +37,7 @@ enum app_state {
             STATE_GNSS_ACQUIRE,
             STATE_NTN_CONNECTED,
             STATE_LTE_PROBE,
-        
-        STATE_IDLE,
+            STATE_IDLE,
 };
 
 

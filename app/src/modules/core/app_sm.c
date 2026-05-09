@@ -113,7 +113,7 @@ static const struct smf_state states[] = {
         running_run,
         running_exit,
         NULL,
-        NULL
+        &states[STATE_DISCONNECTED]
     ),
     /* disconnected parent state */
     [STATE_DISCONNECTED] = SMF_CREATE_STATE(
@@ -123,7 +123,7 @@ static const struct smf_state states[] = {
         &states[STATE_RUNNING],
         &states[STATE_LTEM_CONNECTING]
     ),
-        /* disconnected  child states */
+        /* disconnected child states */
         [STATE_BACKOFF] = SMF_CREATE_STATE(
             backoff_entry,
             backoff_run,
@@ -314,7 +314,7 @@ static enum smf_state_result boot_run(void *obj)
         if (IS_ENABLED(CONFIG_APP_DEBUG_BOOT)) {
             LOG_INF("DEBUG: Halting in STATE_BOOT after initialization");
         } else {
-            transition_to_state(ctx, STATE_DISCONNECTED);
+            transition_to_state(ctx, STATE_LTEM_CONNECTING);
         }
     }
     return SMF_EVENT_HANDLED;
@@ -405,6 +405,8 @@ static enum smf_state_result connected_run(void *obj)
 {
     struct app_ctx *ctx = obj;
 
+    LOG_WRN("CONNECTED parent saw event: %s", app_evt_name(ctx->ev.type));
+    
     switch (ctx->ev.type) {
     case EVT_CLOUD_DISCONNECTED:
         ctx->cloud_connected = false;
@@ -429,11 +431,14 @@ static enum smf_state_result connected_run(void *obj)
 
     case EVT_RSRP_UPDATE:
         ctx->rsrp_dbm = ctx->ev.meas.rsrp_dbm;
+        
+        LOG_WRN("CONNECTED parent handled EVT_RSRP_UPDATE: %d dBm", ctx->rsrp_dbm);
+        
         LOG_INF("Network quality sample / RSRP update: %d dBm", ctx->rsrp_dbm);
         return SMF_EVENT_HANDLED;
 
     default:
-        return SMF_EVENT_HANDLED;
+        return SMF_EVENT_PROPAGATE;
     }
 }
 
@@ -488,7 +493,7 @@ static enum smf_state_result ltem_connecting_run(void *obj)
         return SMF_EVENT_HANDLED;
 
         default:
-            return SMF_EVENT_HANDLED;
+            return SMF_EVENT_PROPAGATE;
     }
 }
 
@@ -615,11 +620,16 @@ static enum smf_state_result ltem_connected_run(void *obj)
     struct app_ctx *ctx = obj;
 
     switch (ctx->ev.type) {
-    case EVT_RSRP_UPDATE:
+    /*
+        case EVT_RSRP_UPDATE:
         ctx->rsrp_dbm = ctx->ev.meas.rsrp_dbm;
         LOG_INF("Updated LTE RSRP: %d dBm", ctx->rsrp_dbm);
         return SMF_EVENT_HANDLED;
-
+    
+    case EVT_RSRP_UPDATE:
+        LOG_INF("LTEM_CONNECTED: propagating EVT_RSRP_UPDATE to parent");
+        return SMF_EVENT_PROPAGATE;
+    */
     case EVT_LTE_POOR:
         LOG_WRN("LTE poor, consider switching RAT");
         ctx->next_rat = RAT_NTN;
@@ -674,7 +684,9 @@ static enum smf_state_result ltem_connected_run(void *obj)
 #endif
 
     default:
-        return SMF_EVENT_HANDLED;
+        /* send unkown events to parent state */
+        LOG_INF("unkown event arrived should propagate to parent node");
+        return SMF_EVENT_PROPAGATE;
     }
 }
 
@@ -750,7 +762,7 @@ static enum smf_state_result cloud_connecting_run(void *obj)
             return SMF_EVENT_HANDLED;
 
         default:
-            return SMF_EVENT_HANDLED;
+            return SMF_EVENT_PROPAGATE;
     }
 }
 
@@ -816,7 +828,7 @@ static enum smf_state_result lte_location_run(void *obj)
             return SMF_EVENT_HANDLED;
 
         default:
-            return SMF_EVENT_HANDLED;
+            return SMF_EVENT_PROPAGATE;
     }
 }
 
@@ -913,7 +925,7 @@ static enum smf_state_result gnss_acquire_run(void *obj)
 
     default:
         LOG_INF("default smf handled");
-        return SMF_EVENT_HANDLED;
+        return SMF_EVENT_PROPAGATE;
     }
 }
 
@@ -983,7 +995,7 @@ static enum smf_state_result ntn_connecting_run(void *obj)
         return SMF_EVENT_HANDLED;
 
     default:
-        return SMF_EVENT_HANDLED;
+        return SMF_EVENT_PROPAGATE;
     }
 }
 
@@ -1049,7 +1061,7 @@ static enum smf_state_result ntn_connected_run(void *obj)
         return SMF_EVENT_HANDLED;
 
     default:
-        return SMF_EVENT_HANDLED;
+        return SMF_EVENT_PROPAGATE;
     }
 }
 
@@ -1180,7 +1192,7 @@ static enum smf_state_result lte_probe_run(void *obj)
         return SMF_EVENT_HANDLED;
 
     default:
-        return SMF_EVENT_HANDLED;
+        return SMF_EVENT_PROPAGATE;
     }
 
 }
@@ -1245,7 +1257,7 @@ static enum smf_state_result backoff_run(void *obj)
         return SMF_EVENT_HANDLED;
 
     default:
-        return SMF_EVENT_HANDLED;
+        return SMF_EVENT_PROPAGATE;
     }
 }
 
