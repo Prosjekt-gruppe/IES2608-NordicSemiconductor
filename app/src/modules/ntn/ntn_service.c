@@ -82,50 +82,9 @@ static int ntn_service_prepare(struct app_ctx *ctx)
 {
     int err;
 
-    struct lte_lc_cellular_profile ntn_profile = {
-        .id = 0,
-        .act = LTE_LC_ACT_NTN,
-        .uicc = LTE_LC_UICC_PHYSICAL,
-    };
-
-    /*
-    struct lte_lc_cellular_profile tn_profile = {
-        .id = 1,
-        .act = LTE_LC_ACT_LTEM || LTE_LC_ACT_NBIOT,
-        .uicc = LTE_LC_UICC_PHYSICAL,
-    };
-    */
-
-    struct lte_lc_cellular_profile tn_profile = {
-        .id = 1,
-        .act = LTE_LC_ACT_LTEM,
-        .uicc = LTE_LC_UICC_PHYSICAL,
-    };
-
-
-    if (!ctx->ntn_initialized) {
-        err = lte_lc_power_off();
-        if (err) {
-            return err;
-        }
-
-        /* setup NTN profile */
-        err = lte_lc_cellular_profile_configure(&ntn_profile);
-        if (err) {
-            return err;
-        }
-
-        /* setup TN profile */
-        err = lte_lc_cellular_profile_configure(&tn_profile);
-        if (err) {
-            return err;
-        }
-
-        ctx->ntn_initialized = true;
-    }
-
     /* simple set location */
     if (ctx->have_fix) {
+        /* TODO: Keep location update near connect to use the latest GNSS fix. */
         err = ntn_location_set((double)ctx->last_pvt.latitude,
                                (double)ctx->last_pvt.longitude,
                                (float)ctx->last_pvt.altitude,
@@ -135,6 +94,7 @@ static int ntn_service_prepare(struct app_ctx *ctx)
         }
     }
 
+    /* TODO: Keep system mode selection close to connect until we decouple from NTN timing. */
     err = lte_lc_system_mode_set(LTE_LC_SYSTEM_MODE_NTN_NBIOT,
                                  LTE_LC_SYSTEM_MODE_PREFER_AUTO);
     
@@ -182,5 +142,4 @@ int ntn_service_connect(struct app_ctx *ctx)
     /* start modem */
     return lte_lc_connect_async(ntn_lc_evt_handler);
 }
-
 

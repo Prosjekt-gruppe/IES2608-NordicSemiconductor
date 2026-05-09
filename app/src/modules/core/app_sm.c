@@ -40,6 +40,8 @@ union app_sm_msg {
 static void boot_entry(void *obj);
 static enum smf_state_result boot_run(void *obj);
 
+static void disconnected_entry(void *obj);
+
 static void ltem_connecting_entry(void *obj); 
 static enum smf_state_result ltem_connecting_run(void *obj);
 
@@ -94,74 +96,95 @@ static const struct smf_state states[] = {
         NULL,
         NULL
     ),
+    [STATE_RUNNING] = SMF_CREATE_STATE(
+        NULL,
+        NULL,
+        NULL,
+        NULL,
+        NULL
+    ),
+    [STATE_CONNECTED] = SMF_CREATE_STATE(
+        NULL,
+        NULL,
+        NULL,
+        &states[STATE_RUNNING],
+        NULL
+    ),
+    [STATE_DISCONNECTED] = SMF_CREATE_STATE(
+        disconnected_entry,
+        NULL,
+        NULL,
+        &states[STATE_RUNNING],
+        NULL
+    ),
     [STATE_LTEM_CONNECTING] = SMF_CREATE_STATE(
         ltem_connecting_entry, 
         ltem_connecting_run, 
         NULL,
-        NULL,
+        &states[STATE_DISCONNECTED],
         NULL
     ),
     [STATE_LTEM_CONNECTED] = SMF_CREATE_STATE(
         ltem_connected_entry,
         ltem_connected_run,
         ltem_connected_exit,
-        NULL,
+        &states[STATE_CONNECTED],
         NULL
     ),
     [STATE_CLOUD_CONNECTING] = SMF_CREATE_STATE(
         cloud_connecting_entry,
         cloud_connecting_run,
         cloud_connecting_exit,
-        NULL,
+        &states[STATE_CONNECTED],
         NULL
     ),
     [STATE_LTE_LOCATION] = SMF_CREATE_STATE(
         lte_location_entry,
         lte_location_run,
         lte_location_exit,
-        NULL,
+        &states[STATE_CONNECTED],
         NULL
     ),
     [STATE_GNSS_ACQUIRE] = SMF_CREATE_STATE(
         gnss_acquire_entry,
         gnss_acquire_run,
         gnss_acquire_exit,
-        NULL,
+        &states[STATE_DISCONNECTED],
         NULL
     ),
     [STATE_NTN_CONNECTING] = SMF_CREATE_STATE(
         ntn_connecting_entry,
         ntn_connecting_run,
         ntn_connecting_exit,
-        NULL,
+        &states[STATE_DISCONNECTED],
         NULL
     ),
     [STATE_NTN_CONNECTED] = SMF_CREATE_STATE(
         ntn_connected_entry,
         ntn_connected_run,
         ntn_connected_exit,
-        NULL,
+        &states[STATE_CONNECTED],
         NULL
     ),
     [STATE_LTE_PROBE] = SMF_CREATE_STATE(
         lte_probe_entry, 
         lte_probe_run,
         NULL, 
-        NULL,
+        &states[STATE_CONNECTED],
         NULL
     ),
     [STATE_IDLE] = SMF_CREATE_STATE(
         NULL,
         NULL,
         NULL,
-        NULL,
+        &states[STATE_DISCONNECTED],
         NULL
     ),
     [STATE_BACKOFF] = SMF_CREATE_STATE(
         backoff_entry,
         backoff_run,
         backoff_exit,
-        NULL,
+        &states[STATE_DISCONNECTED],
         NULL
     ),
 };
@@ -278,6 +301,16 @@ static enum smf_state_result boot_run(void *obj)
         }
     }
     return SMF_EVENT_HANDLED;
+}
+
+static void disconnected_entry(void *obj)
+{
+    struct app_ctx *ctx = obj;
+
+    int err = modem_service_prepare_profiles(ctx);
+    if (err) {
+        LOG_ERR("modem_service_prepare_profiles failed: %d", err);
+    }
 }
 
 static void ltem_connecting_entry(void *obj)

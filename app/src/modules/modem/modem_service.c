@@ -176,6 +176,52 @@ int modem_service_switch_to_ntn(void)
 
 
 
+int modem_service_prepare_profiles(struct app_ctx *ctx)
+{
+    int err;
+
+    if (!initialized || ctx == NULL) {
+        return -EINVAL;
+    }
+
+    if (ctx->ntn_initialized) {
+        return 0;
+    }
+
+    struct lte_lc_cellular_profile ntn_profile = {
+        .id = 0,
+        .act = LTE_LC_ACT_NTN,
+        .uicc = LTE_LC_UICC_PHYSICAL,
+    };
+
+    struct lte_lc_cellular_profile tn_profile = {
+        .id = 1,
+        .act = LTE_LC_ACT_LTEM,
+        .uicc = LTE_LC_UICC_PHYSICAL,
+    };
+
+    err = lte_lc_power_off();
+    if (err) {
+        LOG_ERR("lte_lc_power_off failed: %d", err);
+        return err;
+    }
+
+    err = lte_lc_cellular_profile_configure(&ntn_profile);
+    if (err) {
+        LOG_ERR("NTN profile config failed: %d", err);
+        return err;
+    }
+
+    err = lte_lc_cellular_profile_configure(&tn_profile);
+    if (err) {
+        LOG_ERR("TN profile config failed: %d", err);
+        return err;
+    }
+
+    ctx->ntn_initialized = true;
+    return 0;
+}
+
 int modem_service_udp_send_test(void)
 {
     int sock;
