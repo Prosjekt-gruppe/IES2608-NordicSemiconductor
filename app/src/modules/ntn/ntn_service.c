@@ -84,7 +84,7 @@ static int ntn_service_prepare(struct app_ctx *ctx)
 
     /* simple set location */
     if (ctx->have_fix) {
-        /* TODO: Keep location update near connect to use the latest GNSS fix. */
+        /* TODO: Keep location update near connect to avoid stale GNSS fixes from backoff. */
         err = ntn_location_set((double)ctx->last_pvt.latitude,
                                (double)ctx->last_pvt.longitude,
                                (float)ctx->last_pvt.altitude,
@@ -94,7 +94,7 @@ static int ntn_service_prepare(struct app_ctx *ctx)
         }
     }
 
-    /* TODO: Keep system mode selection close to connect until we decouple from NTN timing. */
+    /* TODO: Keep system mode selection close to connect while LTE-M remains active elsewhere. */
     err = lte_lc_system_mode_set(LTE_LC_SYSTEM_MODE_NTN_NBIOT,
                                  LTE_LC_SYSTEM_MODE_PREFER_AUTO);
     
@@ -142,4 +142,3 @@ int ntn_service_connect(struct app_ctx *ctx)
     /* start modem */
     return lte_lc_connect_async(ntn_lc_evt_handler);
 }
-

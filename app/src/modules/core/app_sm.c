@@ -86,6 +86,8 @@ static void ntn_timer_handler(struct k_timer *timer);
 static void ltem_timer_handler(struct k_timer *timer);
 static void handoff_timer_handler(struct k_timer *timer); 
 
+static bool modem_profiles_ready(struct app_ctx *ctx);
+
 
 
 static const struct smf_state states[] = {
@@ -218,6 +220,18 @@ static void transition_to_state(struct app_ctx *ctx, enum app_state next_state)
     smf_set_state(SMF_CTX(ctx), &states[next_state]);
 }
 
+static bool modem_profiles_ready(struct app_ctx *ctx)
+{
+    int err = modem_service_prepare_profiles(ctx);
+
+    if (err) {
+        LOG_ERR("modem_service_prepare_profiles failed: %d", err);
+        return false;
+    }
+
+    return true;
+}
+
 static void dispatch_app_event(struct app_ctx *ctx, const struct app_event *ev)
 {
     ctx->ev = *ev;
@@ -307,17 +321,20 @@ static void disconnected_entry(void *obj)
 {
     struct app_ctx *ctx = obj;
 
-    int err = modem_service_prepare_profiles(ctx);
-    if (err) {
-        LOG_ERR("modem_service_prepare_profiles failed: %d", err);
-    }
+    (void)modem_profiles_ready(ctx);
 }
 
 static void ltem_connecting_entry(void *obj)
 {
-    ARG_UNUSED(obj);
+    struct app_ctx *ctx = obj;
 
     LOG_WRN("ENTER: STATE_LTEM_CONNECTING");
+
+    if (!modem_profiles_ready(ctx)) {
+        struct app_event ev = { .type = EVT_REG_FAIL };
+        (void)app_event_put(&ev, K_NO_WAIT);
+        return;
+    }
 
     int err = lte_service_connect_async();
     if (err){
@@ -792,6 +809,12 @@ static void gnss_acquire_exit(void *obj)
 static void ntn_connecting_entry(void *obj)
 {
     struct app_ctx *ctx = obj;
+
+    if (!modem_profiles_ready(ctx)) {
+        struct app_event ev = { .type = EVT_REG_FAIL };
+        (void)app_event_put(&ev, K_NO_WAIT);
+        return;
+    }
 
     int err = ntn_service_connect(ctx);
 
