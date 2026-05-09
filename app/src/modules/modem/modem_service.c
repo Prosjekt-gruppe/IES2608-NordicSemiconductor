@@ -188,13 +188,13 @@ int modem_service_prepare_profiles(struct app_ctx *ctx)
         return 0;
     }
 
-    struct lte_lc_cellular_profile ntn_profile = {
+    static const struct lte_lc_cellular_profile ntn_profile = {
         .id = 0,
         .act = LTE_LC_ACT_NTN,
         .uicc = LTE_LC_UICC_PHYSICAL,
     };
 
-    struct lte_lc_cellular_profile tn_profile = {
+    static const struct lte_lc_cellular_profile tn_profile = {
         .id = 1,
         .act = LTE_LC_ACT_LTEM,
         .uicc = LTE_LC_UICC_PHYSICAL,

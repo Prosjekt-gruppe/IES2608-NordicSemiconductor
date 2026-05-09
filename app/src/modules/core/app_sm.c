@@ -321,7 +321,10 @@ static void disconnected_entry(void *obj)
 {
     struct app_ctx *ctx = obj;
 
-    (void)modem_profiles_ready(ctx);
+    if (!modem_profiles_ready(ctx)) {
+        /* Connect entries will retry and surface failures. */
+        return;
+    }
 }
 
 static void ltem_connecting_entry(void *obj)
