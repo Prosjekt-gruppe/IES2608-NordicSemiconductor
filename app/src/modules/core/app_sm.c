@@ -405,36 +405,39 @@ static enum smf_state_result connected_run(void *obj)
 {
     struct app_ctx *ctx = obj;
 
-    LOG_WRN("CONNECTED parent saw event: %s", app_evt_name(ctx->ev.type));
-    
     switch (ctx->ev.type) {
+
+    case EVT_RSRP_UPDATE:
+        ctx->rsrp_dbm = ctx->ev.meas.rsrp_dbm;
+
+        LOG_INF("CONNECTED: network quality sample, RSRP=%d dBm",
+                ctx->rsrp_dbm);
+
+        return SMF_EVENT_HANDLED;
+
     case EVT_CLOUD_DISCONNECTED:
         ctx->cloud_connected = false;
-        LOG_WRN("Cloud disconnected in CONNECTED parent");
+        LOG_WRN("CONNECTED: cloud disconnected");
         return SMF_EVENT_HANDLED;
 
     case EVT_PDN_DOWN:
     case EVT_REG_FAIL:
-        LOG_WRN("Network lost in CONNECTED parent -> BACKOFF");
+        LOG_WRN("CONNECTED: network lost -> BACKOFF");
 
         ctx->pdn_up = false;
         ctx->cloud_connected = false;
 
         if (ctx->active_rat == RAT_LTEM) {
+            ctx->lte_connected = false;
             ctx->next_rat = RAT_NTN;
+        } else if (ctx->active_rat == RAT_NTN) {
+            ctx->pdn_up = false;
+            ctx->next_rat = RAT_LTEM;
         } else {
             ctx->next_rat = RAT_LTEM;
         }
 
         transition_to_state(ctx, STATE_BACKOFF);
-        return SMF_EVENT_HANDLED;
-
-    case EVT_RSRP_UPDATE:
-        ctx->rsrp_dbm = ctx->ev.meas.rsrp_dbm;
-        
-        LOG_WRN("CONNECTED parent handled EVT_RSRP_UPDATE: %d dBm", ctx->rsrp_dbm);
-        
-        LOG_INF("Network quality sample / RSRP update: %d dBm", ctx->rsrp_dbm);
         return SMF_EVENT_HANDLED;
 
     default:
@@ -620,16 +623,7 @@ static enum smf_state_result ltem_connected_run(void *obj)
     struct app_ctx *ctx = obj;
 
     switch (ctx->ev.type) {
-    /*
-        case EVT_RSRP_UPDATE:
-        ctx->rsrp_dbm = ctx->ev.meas.rsrp_dbm;
-        LOG_INF("Updated LTE RSRP: %d dBm", ctx->rsrp_dbm);
-        return SMF_EVENT_HANDLED;
-    
-    case EVT_RSRP_UPDATE:
-        LOG_INF("LTEM_CONNECTED: propagating EVT_RSRP_UPDATE to parent");
-        return SMF_EVENT_PROPAGATE;
-    */
+
     case EVT_LTE_POOR:
         LOG_WRN("LTE poor, consider switching RAT");
         ctx->next_rat = RAT_NTN;
@@ -1052,13 +1046,6 @@ static enum smf_state_result ntn_connected_run(void *obj)
 
         return SMF_EVENT_HANDLED;
     
-    case EVT_REG_FAIL:
-    case EVT_PDN_DOWN:
-        ctx->pdn_up = false;
-        ctx->next_rat = RAT_LTEM;
-        LOG_INF("NTN connection lost/failed");
-        transition_to_state(ctx, STATE_BACKOFF);
-        return SMF_EVENT_HANDLED;
 
     default:
         return SMF_EVENT_PROPAGATE;
