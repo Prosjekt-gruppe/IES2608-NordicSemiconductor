@@ -11,8 +11,9 @@
 #include <zephyr/smf.h>
 
 enum rat {
-    RAT_LTEM,
-    RAT_NTN
+    RAT_LTEM = 0,
+    RAT_NTN = 1,
+    RAT_UNKNOWN = 255
 };
 
 struct retry_state {
@@ -87,6 +88,7 @@ enum gnss_goal {
 
 struct app_event {
     enum app_evt_type type;
+    enum rat source_rat;
     union {
         struct nrf_modem_gnss_pvt_data_frame pvt;
         struct { enum rat rat; } reg;
@@ -143,6 +145,8 @@ struct app_ctx {
 
     /* pdn */
     bool pdn_up;
+
+    bool ignore_next_reg_fail;
     
 };
 

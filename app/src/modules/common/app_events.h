@@ -22,6 +22,7 @@ static inline int app_event_publish_type(enum app_evt_type type)
 {
     struct app_event ev = {
         .type = type,
+        .source_rat = RAT_UNKNOWN,
     };
 
     return app_event_put(&ev, K_NO_WAIT);
