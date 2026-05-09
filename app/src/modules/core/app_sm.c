@@ -96,6 +96,7 @@ static void backoff_timer_handler(struct k_timer *timer);
 static void ntn_timer_handler(struct k_timer *timer);
 static void ltem_timer_handler(struct k_timer *timer);
 static void handoff_timer_handler(struct k_timer *timer); 
+static const char *rat_name(enum rat rat);
 
 
 
@@ -240,6 +241,18 @@ static void dispatch_app_event(struct app_ctx *ctx, const struct app_event *ev)
     ctx->ev = *ev;
     LOG_INF("SMF thread got event %s", app_evt_name(ev->type));
     (void)smf_run_state(SMF_CTX(ctx));
+}
+
+static const char *rat_name(enum rat rat)
+{
+    switch (rat) {
+    case RAT_LTEM:
+        return "LTE-M";
+    case RAT_NTN:
+        return "NTN";
+    default:
+        return "UNKNOWN";
+    }
 }
 
 static void boot_entry(void *obj)
@@ -467,7 +480,10 @@ static void ltem_connecting_entry(void *obj)
     int err = lte_service_connect_async();
     if (err){
         LOG_ERR("lte_service_connect_async err=%d", err); 
-        struct app_event ev = { .type = EVT_REG_FAIL};
+        struct app_event ev = {
+            .type = EVT_REG_FAIL,
+            .source_rat = RAT_LTEM,
+        };
         (void)app_event_put(&ev, K_NO_WAIT);
         return;
     }
@@ -481,6 +497,12 @@ static enum smf_state_result ltem_connecting_run(void *obj)
 
     switch (ctx->ev.type) {
     case EVT_REG_OK:
+        if (ctx->ev.source_rat == RAT_NTN) {
+            LOG_WRN("Ignoring %s from %s during LTE-M connect",
+                    app_evt_name(ctx->ev.type),
+                    rat_name(ctx->ev.source_rat));
+            return SMF_EVENT_HANDLED;
+        }
         ctx->active_rat = RAT_LTEM;
         ctx->lte_connected = true;
         ctx->pdn_up = true;
@@ -490,6 +512,12 @@ static enum smf_state_result ltem_connecting_run(void *obj)
         return SMF_EVENT_HANDLED;
 
     case EVT_REG_FAIL:
+        if (ctx->ev.source_rat == RAT_NTN) {
+            LOG_WRN("Ignoring %s from %s during LTE-M connect",
+                    app_evt_name(ctx->ev.type),
+                    rat_name(ctx->ev.source_rat));
+            return SMF_EVENT_HANDLED;
+        }
         ctx->next_rat = RAT_NTN;
         LOG_WRN("TRANSITION: STATE_LTEM_CONNECTING -> STATE_BACKOFF");
         transition_to_state(ctx, STATE_BACKOFF);
@@ -554,15 +582,10 @@ static void ltem_connected_entry(void *obj)
 #endif
  
 #if defined(CONFIG_APP_CORE_SM_PROBE_TEST)
-    LOG_INF("ltem timer start");
-    k_timer_start(&ctx->lte_timer, K_MSEC(3000), K_NO_WAIT);
-/*
-#else
-    /* just for test remove later */
-    LOG_INF("lte timer force bad rsrp");
-    /* allow cloud and gnss and those to setup ok */
-    k_timer_start(&ctx->lte_timer, K_MSEC(60000), K_NO_WAIT);
-*/
+    LOG_INF("forcing NTN fallback test in 10 sec");
+    k_timer_start(&ctx->lte_timer,
+                  K_SECONDS(10),
+                  K_NO_WAIT);
 #endif
     
     // debug
@@ -627,6 +650,8 @@ static enum smf_state_result ltem_connected_run(void *obj)
     case EVT_LTE_POOR:
         LOG_WRN("LTE poor, consider switching RAT");
         ctx->next_rat = RAT_NTN;
+
+        ctx->ignore_next_reg_fail = true;
 
         /* bad patch make better solution later if this works */
         if (lte_service_is_connected()) {
@@ -877,10 +902,14 @@ static enum smf_state_result gnss_acquire_run(void *obj)
     struct app_ctx *ctx = obj;
 
     switch (ctx->ev.type) {
-    case EVT_GNSS_FIX:
+    case EVT_GNSS_FIX: {
+        bool required_for_ntn =
+            (ctx->gnss_goal == GNSS_GOAL_REQUIRED_FOR_NTN);
+
         ctx->last_pvt = ctx->ev.pvt;
         ctx->have_fix = true;
         ctx->last_done = STEP_GNSS_DONE;
+
         ctx->gnss_goal = GNSS_GOAL_NONE;
         ctx->gnss_timeout_sec = 0;
         ctx->gnss_extend_once = false;
@@ -888,13 +917,19 @@ static enum smf_state_result gnss_acquire_run(void *obj)
         LOG_INF("GNSS FIX OK: lat=%f, lon=%f",
                 (double)ctx->last_pvt.latitude,
                 (double)ctx->last_pvt.longitude);
-        LOG_WRN("TRANSITION: STATE_GNSS_ACQUIRE -> STATE_LTEM_CONNECTED");
 
-        transition_to_state(ctx, STATE_LTEM_CONNECTED);
+        if (required_for_ntn) {
+            LOG_WRN("TRANSITION: STATE_GNSS_ACQUIRE -> STATE_NTN_CONNECTING");
+            transition_to_state(ctx, STATE_NTN_CONNECTING);
+        } else {
+            LOG_WRN("TRANSITION: STATE_GNSS_ACQUIRE -> STATE_LTEM_CONNECTED");
+            transition_to_state(ctx, STATE_LTEM_CONNECTED);
+        }
+
         return SMF_EVENT_HANDLED;
-    
+    }
 
-    case EVT_TIMEOUT:
+    case EVT_TIMEOUT: {
         LOG_INF("GNSS_ACQUIRE: gnss timeout");
 
         if (ctx->gnss_goal == GNSS_GOAL_REQUIRED_FOR_NTN &&
@@ -906,16 +941,26 @@ static enum smf_state_result gnss_acquire_run(void *obj)
             return SMF_EVENT_HANDLED;
         }
 
+        bool required_for_ntn =
+            (ctx->gnss_goal == GNSS_GOAL_REQUIRED_FOR_NTN);
+
         ctx->last_done = STEP_GNSS_DONE;
         ctx->gnss_goal = GNSS_GOAL_NONE;
         ctx->gnss_timeout_sec = 0;
         ctx->gnss_extend_once = false;
-        
-        LOG_WRN("No GNSS fix obtained");
-        LOG_WRN("TRANSITION: STATE_GNSS_ACQUIRE -> STATE_LTEM_CONNECTED");
 
-        transition_to_state(ctx, STATE_LTEM_CONNECTED);
+        LOG_WRN("No GNSS fix obtained");
+
+        if (required_for_ntn) {
+            LOG_WRN("TRANSITION: STATE_GNSS_ACQUIRE -> STATE_BACKOFF");
+            transition_to_state(ctx, STATE_BACKOFF);
+        } else {
+            LOG_WRN("TRANSITION: STATE_GNSS_ACQUIRE -> STATE_LTEM_CONNECTED");
+            transition_to_state(ctx, STATE_LTEM_CONNECTED);
+        }
+
         return SMF_EVENT_HANDLED;
+    }
 
     default:
         LOG_INF("default smf handled");
@@ -939,7 +984,10 @@ static void ntn_connecting_entry(void *obj)
 
     if (err) {
         LOG_INF("ntn initialization failed (%d)", err);
-        struct app_event ev = { .type = EVT_REG_FAIL };
+        struct app_event ev = {
+            .type = EVT_REG_FAIL,
+            .source_rat = RAT_NTN,
+        };
         (void)app_event_put(&ev, K_NO_WAIT);
         return;
     }
@@ -953,6 +1001,12 @@ static enum smf_state_result ntn_connecting_run(void *obj)
 
     switch (ctx->ev.type) {
     case EVT_REG_OK:
+        if (ctx->ev.source_rat != RAT_NTN) {
+            LOG_WRN("Ignoring %s from %s during NTN connect",
+                    app_evt_name(ctx->ev.type),
+                    rat_name(ctx->ev.source_rat));
+            return SMF_EVENT_HANDLED;
+        }
         LOG_INF("ntn registered ok");
 
         /* connection success -> reset retry attempt-counter */
@@ -963,6 +1017,12 @@ static enum smf_state_result ntn_connecting_run(void *obj)
         return SMF_EVENT_HANDLED;
     
     case EVT_PDN_UP:
+        if (ctx->ev.source_rat != RAT_NTN) {
+            LOG_WRN("Ignoring %s from %s during NTN connect",
+                    app_evt_name(ctx->ev.type),
+                    rat_name(ctx->ev.source_rat));
+            return SMF_EVENT_HANDLED;
+        }
         LOG_WRN("PDN_UP in NTN_CONNECTING (unexpected order)");
         retry_reset(ctx, RAT_NTN);
         ctx->pdn_up = true;
@@ -971,7 +1031,28 @@ static enum smf_state_result ntn_connecting_run(void *obj)
         return SMF_EVENT_HANDLED;
 
     case EVT_REG_FAIL:
+        if (ctx->ev.source_rat != RAT_NTN) {
+            LOG_WRN("Ignoring %s from %s during NTN connect",
+                    app_evt_name(ctx->ev.type),
+                    rat_name(ctx->ev.source_rat));
+            return SMF_EVENT_HANDLED;
+        }
+
+        if (ctx->ignore_next_reg_fail) {
+            ctx->ignore_next_reg_fail = false;
+
+            LOG_WRN("Ignoring stale REG_FAIL during NTN transition");
+            return SMF_EVENT_HANDLED;
+        }
+
+        LOG_INF("ntn connect failed/timeout");
     case EVT_PDN_DOWN:
+        if (ctx->ev.type == EVT_PDN_DOWN && ctx->ev.source_rat != RAT_NTN) {
+            LOG_WRN("Ignoring %s from %s during NTN connect",
+                    app_evt_name(ctx->ev.type),
+                    rat_name(ctx->ev.source_rat));
+            return SMF_EVENT_HANDLED;
+        }
     case EVT_TIMEOUT:
         LOG_INF("ntn connect failed/timeout");
         ctx->pdn_up=false;

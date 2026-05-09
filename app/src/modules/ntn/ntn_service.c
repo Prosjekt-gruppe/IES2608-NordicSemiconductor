@@ -28,7 +28,13 @@ static void ntn_lc_evt_handler(const struct lte_lc_evt *const evt)
         case LTE_LC_NW_REG_REGISTERED_HOME:
         case LTE_LC_NW_REG_REGISTERED_ROAMING:
             LOG_INF("NTN registered on network");
-            (void)app_event_publish_type(EVT_REG_OK);
+            {
+                struct app_event ev = {
+                    .type = EVT_REG_OK,
+                    .source_rat = RAT_NTN,
+                };
+                (void)app_event_put(&ev, K_NO_WAIT);
+            }
             break;
 
         case LTE_LC_NW_REG_NOT_REGISTERED:
@@ -36,7 +42,13 @@ static void ntn_lc_evt_handler(const struct lte_lc_evt *const evt)
         case LTE_LC_NW_REG_UNKNOWN:
         case LTE_LC_NW_REG_UICC_FAIL:
             LOG_WRN("NTN registration failed/status=%d", evt->nw_reg_status);
-            (void)app_event_publish_type(EVT_REG_FAIL);
+            {
+                struct app_event ev = {
+                    .type = EVT_REG_FAIL,
+                    .source_rat = RAT_NTN,
+                };
+                (void)app_event_put(&ev, K_NO_WAIT);
+            }
             break;
 
         default:
@@ -49,13 +61,25 @@ static void ntn_lc_evt_handler(const struct lte_lc_evt *const evt)
 
         case LTE_LC_EVT_PDN_ACTIVATED:
             LOG_INF("NTN: PDN activated");
-            (void)app_event_publish_type(EVT_PDN_UP);
+            {
+                struct app_event ev = {
+                    .type = EVT_PDN_UP,
+                    .source_rat = RAT_NTN,
+                };
+                (void)app_event_put(&ev, K_NO_WAIT);
+            }
             break;
 
         case LTE_LC_EVT_PDN_DEACTIVATED:
         case LTE_LC_EVT_PDN_NETWORK_DETACH:
             LOG_INF("NTN: PDN down");
-            (void)app_event_publish_type(EVT_PDN_DOWN);
+            {
+                struct app_event ev = {
+                    .type = EVT_PDN_DOWN,
+                    .source_rat = RAT_NTN,
+                };
+                (void)app_event_put(&ev, K_NO_WAIT);
+            }
             break;
 
         default:

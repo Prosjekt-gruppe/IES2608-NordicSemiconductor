@@ -50,9 +50,17 @@ static void lte_lc_evt_handler(const struct lte_lc_evt *const evt)
 
             if (probe_pending) {
                 probe_pending = false;
-                (void)app_event_publish_type(EVT_TN_READY_FOR_PROBE);
+                struct app_event ev = {
+                    .type = EVT_TN_READY_FOR_PROBE,
+                    .source_rat = RAT_LTEM,
+                };
+                (void)app_event_put(&ev, K_NO_WAIT);
             } else {
-                (void)app_event_publish_type(EVT_REG_OK);
+                struct app_event ev = {
+                    .type = EVT_REG_OK,
+                    .source_rat = RAT_LTEM,
+                };
+                (void)app_event_put(&ev, K_NO_WAIT);
             }
 
             LOG_INF("LTE registered on network");
@@ -64,7 +72,11 @@ static void lte_lc_evt_handler(const struct lte_lc_evt *const evt)
         case LTE_LC_NW_REG_UICC_FAIL:
             lte_connected=false;
             LOG_WRN("LTE registration failed/status=%d", evt->nw_reg_status);
-            (void)app_event_publish_type(EVT_REG_FAIL);
+            struct app_event ev = {
+                .type = EVT_REG_FAIL,
+                .source_rat = RAT_LTEM,
+            };
+            (void)app_event_put(&ev, K_NO_WAIT);
             break;
 
         default:
