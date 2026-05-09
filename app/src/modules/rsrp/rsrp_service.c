@@ -361,8 +361,9 @@ int rsrp_service_get(int *rsrp_dbm)
 	}
 
 	LOG_DBG("CESQ response: %s", response);
-
-	parsed = sscanf(response, "+CESQ: %d,%d,%d,%d,%d,%d",
+	// change to event based architecture (see lte_lc-lib?)	
+	// coneval supprted in link controller api	
+	parsed = sscanf(response, "+CESQ: %d,%d,%d,%d,%d,%d",	
 			&rxlev, &ber, &rscp, &ecno, &rsrq, &rsrp_raw);
 	if (parsed != 6) {
 		LOG_WRN("Failed to parse CESQ response");

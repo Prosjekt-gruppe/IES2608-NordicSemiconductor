@@ -23,16 +23,21 @@ struct retry_state {
 
 enum app_state {
     STATE_BOOT,
-    STATE_IDLE,
-    STATE_GNSS_ACQUIRE,
-    STATE_NTN_CONNECTING,
-    STATE_NTN_CONNECTED,
-    STATE_LTEM_CONNECTING,
-    STATE_LTEM_CONNECTED,
-    STATE_CLOUD_CONNECTING,
-    STATE_LTE_LOCATION,
-    STATE_LTE_PROBE,
-    STATE_BACKOFF,
+    STATE_RUNNING, // parent state
+
+        STATE_DISCONNECTED,
+            STATE_BACKOFF,
+            STATE_LTEM_CONNECTING,
+            STATE_NTN_CONNECTING,
+
+        STATE_CONNECTED,
+            STATE_LTEM_CONNECTED,
+            STATE_CLOUD_CONNECTING,
+            STATE_LTE_LOCATION,
+            STATE_GNSS_ACQUIRE,
+            STATE_NTN_CONNECTED,
+            STATE_LTE_PROBE,
+            STATE_IDLE,
 };
 
 
