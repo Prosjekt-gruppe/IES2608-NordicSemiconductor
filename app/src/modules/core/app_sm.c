@@ -877,10 +877,14 @@ static enum smf_state_result gnss_acquire_run(void *obj)
     struct app_ctx *ctx = obj;
 
     switch (ctx->ev.type) {
-    case EVT_GNSS_FIX:
+    case EVT_GNSS_FIX: {
+        bool required_for_ntn =
+            (ctx->gnss_goal == GNSS_GOAL_REQUIRED_FOR_NTN);
+
         ctx->last_pvt = ctx->ev.pvt;
         ctx->have_fix = true;
         ctx->last_done = STEP_GNSS_DONE;
+
         ctx->gnss_goal = GNSS_GOAL_NONE;
         ctx->gnss_timeout_sec = 0;
         ctx->gnss_extend_once = false;
@@ -888,13 +892,19 @@ static enum smf_state_result gnss_acquire_run(void *obj)
         LOG_INF("GNSS FIX OK: lat=%f, lon=%f",
                 (double)ctx->last_pvt.latitude,
                 (double)ctx->last_pvt.longitude);
-        LOG_WRN("TRANSITION: STATE_GNSS_ACQUIRE -> STATE_LTEM_CONNECTED");
 
-        transition_to_state(ctx, STATE_LTEM_CONNECTED);
+        if (required_for_ntn) {
+            LOG_WRN("TRANSITION: STATE_GNSS_ACQUIRE -> STATE_NTN_CONNECTING");
+            transition_to_state(ctx, STATE_NTN_CONNECTING);
+        } else {
+            LOG_WRN("TRANSITION: STATE_GNSS_ACQUIRE -> STATE_LTEM_CONNECTED");
+            transition_to_state(ctx, STATE_LTEM_CONNECTED);
+        }
+
         return SMF_EVENT_HANDLED;
-    
+    }
 
-    case EVT_TIMEOUT:
+    case EVT_TIMEOUT: {
         LOG_INF("GNSS_ACQUIRE: gnss timeout");
 
         if (ctx->gnss_goal == GNSS_GOAL_REQUIRED_FOR_NTN &&
@@ -906,16 +916,26 @@ static enum smf_state_result gnss_acquire_run(void *obj)
             return SMF_EVENT_HANDLED;
         }
 
+        bool required_for_ntn =
+            (ctx->gnss_goal == GNSS_GOAL_REQUIRED_FOR_NTN);
+
         ctx->last_done = STEP_GNSS_DONE;
         ctx->gnss_goal = GNSS_GOAL_NONE;
         ctx->gnss_timeout_sec = 0;
         ctx->gnss_extend_once = false;
-        
-        LOG_WRN("No GNSS fix obtained");
-        LOG_WRN("TRANSITION: STATE_GNSS_ACQUIRE -> STATE_LTEM_CONNECTED");
 
-        transition_to_state(ctx, STATE_LTEM_CONNECTED);
+        LOG_WRN("No GNSS fix obtained");
+
+        if (required_for_ntn) {
+            LOG_WRN("TRANSITION: STATE_GNSS_ACQUIRE -> STATE_BACKOFF");
+            transition_to_state(ctx, STATE_BACKOFF);
+        } else {
+            LOG_WRN("TRANSITION: STATE_GNSS_ACQUIRE -> STATE_LTEM_CONNECTED");
+            transition_to_state(ctx, STATE_LTEM_CONNECTED);
+        }
+
         return SMF_EVENT_HANDLED;
+    }
 
     default:
         LOG_INF("default smf handled");
