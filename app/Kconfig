@@ -11,10 +11,12 @@ menu "LTEM-NTN Fallback Testbench"
 # state machine config (can be board specific)
 config APP_GNSS_TIMEOUT_SEC
     int "GNSS timeout in seconds"
-    default 10
+    default 120
     range 1 600
     help
-      Timeout for GNSS acquisition before continuing.
+      Timeout for GNSS acquisition before continuing. Assisted GNSS can still
+      need more than 30 seconds outdoors, especially after a cold start or when
+      the antenna view is marginal.
 
 config APP_MODEM_SIGNAL_POLL_INTERVAL_SEC
     int "LTE-M signal poll interval in seconds"

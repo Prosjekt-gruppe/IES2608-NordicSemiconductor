@@ -24,10 +24,13 @@
 
 LOG_MODULE_REGISTER(gnss_service, LOG_LEVEL_INF);
 
+#define GNSS_AGNSS_PENDING_EXTENSION_SEC 30
+
 /* internal state */
 static struct k_work gnss_pvt_work;
 static struct k_work_delayable gnss_timeout_work;
 static struct k_work agnss_request_work;
+static struct k_work_delayable agnss_monitor_work;
 
 static struct nrf_modem_gnss_pvt_data_frame pvt_data;
 static struct nrf_modem_gnss_agnss_data_frame agnss_req;
@@ -39,6 +42,8 @@ static bool gnss_initialized;
 static bool gnss_running;
 static bool assisted_start_in_progress;
 static bool agnss_ready;
+static bool agnss_request_sent;
+static bool agnss_pending_timeout_extended;
 static bool fix_published;
 
 /* forward declarations */
@@ -55,10 +60,11 @@ static void gnss_timeout_work_handler(struct k_work *work);
 static void gnss_pvt_work_handler(struct k_work *work);
 static void gnss_event_handler(int event);
 static void agnss_request_work_handler(struct k_work *work);
+static void agnss_monitor_work_handler(struct k_work *work);
 
 static int gnss_prepare_agnss(void);
 static int gnss_start_search(void);
-static void gnss_restart_with_agnss(void);
+static void gnss_mark_agnss_ready(const char *source);
 
 /* app event + zbus publish */
 
@@ -161,6 +167,16 @@ static void gnss_timeout_work_handler(struct k_work *work)
 {
     ARG_UNUSED(work);
 
+    if (gnss_running && assisted_start_in_progress &&
+        agnss_request_sent && nrf_cloud_agnss_request_in_progress() &&
+        !agnss_pending_timeout_extended) {
+        agnss_pending_timeout_extended = true;
+        LOG_WRN("GNSS timeout while A-GNSS request is still pending; extending by %d sec",
+                GNSS_AGNSS_PENDING_EXTENSION_SEC);
+        (void)gnss_service_start_timeout(GNSS_AGNSS_PENDING_EXTENSION_SEC);
+        return;
+    }
+
     int err = publish_timeout();
     LOG_INF("gnss timeout fired, publish err=%d", err);
 }
@@ -258,9 +274,12 @@ int gnss_service_init(void)
     assisted_start_in_progress = false;
     agnss_ready = false;
     agnss_req_received = false;
+    agnss_request_sent = false;
+    agnss_pending_timeout_extended = false;
 
     k_work_init(&gnss_pvt_work, gnss_pvt_work_handler);
     k_work_init(&agnss_request_work, agnss_request_work_handler);
+    k_work_init_delayable(&agnss_monitor_work, agnss_monitor_work_handler);
     k_work_init_delayable(&gnss_timeout_work, gnss_timeout_work_handler);
 
     err = nrf_modem_gnss_event_handler_set(gnss_event_handler);
@@ -321,6 +340,11 @@ static int gnss_prepare_agnss(void)
     }
 
     LOG_INF("Requesting A-GNSS from cloud");
+    LOG_INF("A-GNSS request need: flags=0x%x systems=%u gps_ephe=0x%016llx gps_alm=0x%016llx",
+            (unsigned int)agnss_req.data_flags,
+            (unsigned int)agnss_req.system_count,
+            (unsigned long long)agnss_req.system[0].sv_mask_ephe,
+            (unsigned long long)agnss_req.system[0].sv_mask_alm);
 
     err = nrf_cloud_agnss_request(&agnss_req);
     LOG_INF("nrf_cloud_agnss_request() -> %d", err);
@@ -329,6 +353,9 @@ static int gnss_prepare_agnss(void)
         LOG_ERR("A-GNSS request failed: %d", err);
         return err;
     }
+
+    agnss_request_sent = true;
+    (void)k_work_reschedule(&agnss_monitor_work, K_SECONDS(1));
 
     LOG_INF("A-GNSS request sent successfully");
     return 0;
@@ -353,6 +380,8 @@ int gnss_service_start_assisted(int32_t timeout_sec)
 
     agnss_ready = false;
     agnss_req_received = false;
+    agnss_request_sent = false;
+    agnss_pending_timeout_extended = false;
     assisted_start_in_progress = true;
 
     LOG_INF("Starting GNSS (preparing for AGNSS)");
@@ -381,9 +410,25 @@ static void agnss_request_work_handler(struct k_work *work)
     }
 }
 
-void gnss_notify_agnss_ready(void)
+static bool agnss_processed_has_data(const struct nrf_modem_gnss_agnss_data_frame *processed)
 {
-    LOG_INF("gnss_notify_agnss_ready: entry");
+    if (processed->data_flags != 0) {
+        return true;
+    }
+
+    for (uint8_t i = 0; i < processed->system_count; i++) {
+        if (processed->system[i].sv_mask_ephe != 0 ||
+            processed->system[i].sv_mask_alm != 0) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+static void gnss_mark_agnss_ready(const char *source)
+{
+    struct nrf_modem_gnss_agnss_data_frame processed = {0};
 
     if (!gnss_running) {
         LOG_WRN("Ignoring A-GNSS ready notification: GNSS not running");
@@ -395,16 +440,48 @@ void gnss_notify_agnss_ready(void)
         return;
     }
 
-    LOG_INF("A-GNSS data received and injected into modem");
+    nrf_cloud_agnss_processed(&processed);
+    if (agnss_processed_has_data(&processed)) {
+        LOG_INF("A-GNSS data processed via %s: flags=0x%x gps_ephe=0x%016llx gps_alm=0x%016llx",
+                source,
+                (unsigned int)processed.data_flags,
+                (unsigned long long)processed.system[0].sv_mask_ephe,
+                (unsigned long long)processed.system[0].sv_mask_alm);
+    } else {
+        LOG_WRN("A-GNSS request completed via %s, but no processed elements were reported",
+                source);
+    }
 
     agnss_ready = true;
+    agnss_request_sent = false;
+    agnss_pending_timeout_extended = false;
     assisted_start_in_progress = false;
 
-    LOG_INF("Restarting GNSS after A-GNSS");
-    gnss_restart_with_agnss();
+    LOG_INF("Continuing GNSS search after A-GNSS; timeout extended by %d sec",
+            CONFIG_APP_GNSS_TIMEOUT_SEC);
+    (void)gnss_service_start_timeout(CONFIG_APP_GNSS_TIMEOUT_SEC);
+}
 
-    /* restart timeout */
-    (void)gnss_service_start_timeout(30);
+static void agnss_monitor_work_handler(struct k_work *work)
+{
+    ARG_UNUSED(work);
+
+    if (!gnss_running || !assisted_start_in_progress ||
+        !agnss_request_sent || agnss_ready) {
+        return;
+    }
+
+    if (nrf_cloud_agnss_request_in_progress()) {
+        (void)k_work_reschedule(&agnss_monitor_work, K_SECONDS(1));
+        return;
+    }
+
+    gnss_mark_agnss_ready("nRF Cloud MQTT");
+}
+
+void gnss_notify_agnss_ready(void)
+{
+    gnss_mark_agnss_ready("cloud callback");
 }
 
 int gnss_service_start(void)
@@ -429,27 +506,16 @@ int gnss_service_start(void)
     return 0;
 }
 
-static void gnss_restart_with_agnss(void)
-{
-    int err;
-
-    LOG_INF("Restarting GNSS with A-GNSS");
-
-    (void)gnss_service_stop();
-
-    err = gnss_start_search();
-    if (err) {
-        LOG_ERR("Failed to restart GNSS: %d", err);
-    }
-}
-
 int gnss_service_stop(void)
 {
     int err = nrf_modem_gnss_stop();
 
     if (!err) {
+        (void)k_work_cancel_delayable(&agnss_monitor_work);
         gnss_running = false;
         agnss_ready = false;
+        agnss_request_sent = false;
+        agnss_pending_timeout_extended = false;
         assisted_start_in_progress = false;
         LOG_INF("GNSS stopped");
     }

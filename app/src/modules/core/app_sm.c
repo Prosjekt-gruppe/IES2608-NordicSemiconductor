@@ -831,7 +831,7 @@ static enum smf_state_result lte_location_run(void *obj)
             ctx->last_done = STEP_LTE_LOC_DONE;
 
             ctx->gnss_goal = GNSS_GOAL_REFINE_LTE_FIX;
-            ctx->gnss_timeout_sec = 30; 
+            ctx->gnss_timeout_sec = CONFIG_APP_GNSS_TIMEOUT_SEC;
             ctx->gnss_extend_once = false; 
 
             LOG_INF("LTE location fix stored: lat=%f lon=%f",
@@ -886,7 +886,7 @@ static void gnss_acquire_entry(void *obj)
     LOG_WRN("ENTER: STATE_GNSS_ACQUIRE");
 
     if (timeout_sec <= 0) {
-        timeout_sec = 15;
+        timeout_sec = CONFIG_APP_GNSS_TIMEOUT_SEC;
     }
 
     LOG_INF("GNSS goal=%d timeout=%d sec",
@@ -948,8 +948,9 @@ static enum smf_state_result gnss_acquire_run(void *obj)
             ctx->gnss_extend_once) {
             ctx->gnss_extend_once = false;
 
-            LOG_WRN("GNSS required for NTN: extending search once by 30 sec");
-            (void)gnss_service_start_timeout(30);
+            LOG_WRN("GNSS required for NTN: extending search once by %d sec",
+                    CONFIG_APP_GNSS_TIMEOUT_SEC);
+            (void)gnss_service_start_timeout(CONFIG_APP_GNSS_TIMEOUT_SEC);
             return SMF_EVENT_HANDLED;
         }
 
@@ -1352,7 +1353,7 @@ static enum smf_state_result backoff_run(void *obj)
         if (!ctx->have_fix) {
             LOG_INF("No GNSS fix -> trying to acquire fix");
             ctx->gnss_goal = GNSS_GOAL_REQUIRED_FOR_NTN;
-            ctx->gnss_timeout_sec = 60; 
+            ctx->gnss_timeout_sec = CONFIG_APP_GNSS_TIMEOUT_SEC;
             ctx->gnss_extend_once = true;
 
             LOG_WRN("TRANSITION: STATE_BACKOFF -> STATE_GNSS_ACQUIRE");
