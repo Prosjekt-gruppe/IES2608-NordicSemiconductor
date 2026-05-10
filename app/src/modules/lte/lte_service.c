@@ -113,7 +113,25 @@ void lte_service_set_probe_pending(bool enable)
 
 int lte_service_connect_async(void)
 {
+    int err;
+
     lte_connected = false;
+
+    LOG_INF("Preparing modem for LTE-M/GNSS");
+
+    err = lte_lc_power_off();
+    if (err) {
+        LOG_ERR("LTE modem power-off before connect failed: %d", err);
+        return err;
+    }
+
+    err = lte_lc_system_mode_set(LTE_LC_SYSTEM_MODE_LTEM_GPS,
+                                 LTE_LC_SYSTEM_MODE_PREFER_LTEM);
+    if (err) {
+        LOG_ERR("LTE-M/GNSS system mode set failed: %d", err);
+        return err;
+    }
+
     return lte_lc_connect_async(lte_lc_evt_handler);   
 }
 

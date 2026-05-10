@@ -470,17 +470,9 @@ static void connected_exit(void *obj)
 
 static void ltem_connecting_entry(void *obj)
 {
-    struct app_ctx *ctx = obj;
+    ARG_UNUSED(obj);
 
     LOG_WRN("ENTER: STATE_LTEM_CONNECTING");
-
-    if (ctx->active_rat == RAT_NTN) {
-        int err = modem_service_switch_to_tn();
-        if (err) {
-            LOG_WRN("switch_to_tn failed during NTN->TN recovery: %d", err);
-            /* continue anyway? maybe full LTE connect still works */
-        }
-    }
 
     int err = lte_service_connect_async();
     if (err) {
@@ -663,9 +655,6 @@ static enum smf_state_result ltem_connected_run(void *obj)
         LOG_WRN("LTE poor, consider switching RAT");
         ctx->next_rat = RAT_NTN;
 
-        ctx->ignore_next_reg_fail = true;
-
-        /* bad patch make better solution later if this works */
         if (lte_service_is_connected()) {
             
             /* try disconnecting all services before NTN */
@@ -998,7 +987,7 @@ static void ntn_connecting_entry(void *obj)
     if (err) {
         LOG_INF("ntn initialization failed (%d)", err);
         struct app_event ev = {
-            .type = EVT_REG_FAIL,
+            .type = EVT_MODEM_SWITCH_FAIL,
             .source_rat = RAT_NTN,
         };
         (void)app_event_put(&ev, K_NO_WAIT);
@@ -1043,6 +1032,10 @@ static enum smf_state_result ntn_connecting_run(void *obj)
         transition_to_state(ctx, STATE_NTN_CONNECTED);
         return SMF_EVENT_HANDLED;
 
+    case EVT_MODEM_SWITCH_FAIL:
+        LOG_WRN("NTN modem setup failed");
+        __fallthrough;
+
     case EVT_REG_FAIL:
         if (ctx->ev.source_rat != RAT_NTN) {
             LOG_WRN("Ignoring %s from %s during NTN connect",
@@ -1051,14 +1044,9 @@ static enum smf_state_result ntn_connecting_run(void *obj)
             return SMF_EVENT_HANDLED;
         }
 
-        if (ctx->ignore_next_reg_fail) {
-            ctx->ignore_next_reg_fail = false;
+        LOG_INF("ntn connect failed");
+        __fallthrough;
 
-            LOG_WRN("Ignoring stale REG_FAIL during NTN transition");
-            return SMF_EVENT_HANDLED;
-        }
-
-        LOG_INF("ntn connect failed/timeout");
     case EVT_PDN_DOWN:
         if (ctx->ev.type == EVT_PDN_DOWN && ctx->ev.source_rat != RAT_NTN) {
             LOG_WRN("Ignoring %s from %s during NTN connect",
@@ -1066,6 +1054,8 @@ static enum smf_state_result ntn_connecting_run(void *obj)
                     rat_name(ctx->ev.source_rat));
             return SMF_EVENT_HANDLED;
         }
+        __fallthrough;
+
     case EVT_TIMEOUT:
         LOG_INF("ntn connect failed/timeout");
         ctx->pdn_up=false;
@@ -1077,6 +1067,8 @@ static enum smf_state_result ntn_connecting_run(void *obj)
             LOG_WRN("NTN retries exhausted -> trying LTE-M connection...");
             retry_reset(ctx, RAT_NTN);
             ctx->next_rat = RAT_LTEM;
+        } else {
+            ctx->next_rat = RAT_NTN;
         }
         
         transition_to_state(ctx, STATE_BACKOFF);

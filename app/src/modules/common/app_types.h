@@ -145,8 +145,6 @@ struct app_ctx {
 
     /* pdn */
     bool pdn_up;
-
-    bool ignore_next_reg_fail;
     
 };
 

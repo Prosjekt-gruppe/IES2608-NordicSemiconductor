@@ -7,7 +7,7 @@
 #include "ntn_service.h"
 #include "app_events.h"
 
-#include "modem_service.h"
+#include <errno.h>
 #include <nrf_modem_at.h>
 #include <modem/lte_lc.h>
 #include <modem/ntn.h>
@@ -17,6 +17,63 @@
 LOG_MODULE_REGISTER(ntn_service, LOG_LEVEL_INF);
 
 static bool initialized;
+static struct app_ctx *active_ctx;
+static void ntn_location_work_handler(struct k_work *work);
+
+K_WORK_DEFINE(ntn_location_work, ntn_location_work_handler);
+
+static int ntn_service_set_location(const struct app_ctx *ctx, uint32_t validity)
+{
+    int err;
+
+    if (!ctx->have_fix) {
+        LOG_WRN("No GNSS fix available for NTN location update");
+        return -ENODATA;
+    }
+
+    LOG_INF("Setting NTN location: lat=%f lon=%f alt=%f",
+            (double)ctx->last_pvt.latitude,
+            (double)ctx->last_pvt.longitude,
+            (double)ctx->last_pvt.altitude);
+
+    err = ntn_location_set((double)ctx->last_pvt.latitude,
+                           (double)ctx->last_pvt.longitude,
+                           (float)ctx->last_pvt.altitude,
+                           validity);
+    if (err) {
+        LOG_ERR("ntn_location_set failed: %d", err);
+    }
+
+    return err;
+}
+
+static void ntn_location_work_handler(struct k_work *work)
+{
+    ARG_UNUSED(work);
+
+    if (active_ctx != NULL) {
+        (void)ntn_service_set_location(active_ctx, 0);
+    }
+}
+
+static void ntn_evt_handler(const struct ntn_evt *evt)
+{
+    switch (evt->type) {
+    case NTN_EVT_LOCATION_REQUEST:
+        LOG_INF("NTN location request: requested=%d accuracy=%u m",
+                evt->location_request.requested,
+                (unsigned int)evt->location_request.accuracy);
+
+        if (evt->location_request.requested) {
+            (void)k_work_submit(&ntn_location_work);
+        }
+        break;
+
+    default:
+        LOG_DBG("Unhandled NTN library event: %d", evt->type);
+        break;
+    }
+}
 
 static void ntn_lc_evt_handler(const struct lte_lc_evt *const evt)
 {    
@@ -106,65 +163,28 @@ static int ntn_service_prepare(struct app_ctx *ctx)
 {
     int err;
 
-    struct lte_lc_cellular_profile ntn_profile = {
-        .id = 0,
-        .act = LTE_LC_ACT_NTN,
-        .uicc = LTE_LC_UICC_PHYSICAL,
-    };
+    LOG_INF("Preparing modem for NTN NB-IoT");
 
-    /*
-    struct lte_lc_cellular_profile tn_profile = {
-        .id = 1,
-        .act = LTE_LC_ACT_LTEM || LTE_LC_ACT_NBIOT,
-        .uicc = LTE_LC_UICC_PHYSICAL,
-    };
-    */
-
-    struct lte_lc_cellular_profile tn_profile = {
-        .id = 1,
-        .act = LTE_LC_ACT_LTEM,
-        .uicc = LTE_LC_UICC_PHYSICAL,
-    };
-
-
-    if (!ctx->ntn_initialized) {
-        err = lte_lc_power_off();
-        if (err) {
-            return err;
-        }
-
-        /* setup NTN profile */
-        err = lte_lc_cellular_profile_configure(&ntn_profile);
-        if (err) {
-            return err;
-        }
-
-        /* setup TN profile */
-        err = lte_lc_cellular_profile_configure(&tn_profile);
-        if (err) {
-            return err;
-        }
-
-        ctx->ntn_initialized = true;
+    err = lte_lc_power_off();
+    if (err) {
+        LOG_ERR("lte_lc_power_off before NTN setup failed: %d", err);
+        return err;
     }
 
-    /* simple set location */
-    if (ctx->have_fix) {
-        err = ntn_location_set((double)ctx->last_pvt.latitude,
-                               (double)ctx->last_pvt.longitude,
-                               (float)ctx->last_pvt.altitude,
-                               0);
-        if (err) {
-            return err;
-        }
+    err = ntn_service_set_location(ctx, 0);
+    if (err) {
+        return err;
     }
 
     err = lte_lc_system_mode_set(LTE_LC_SYSTEM_MODE_NTN_NBIOT,
                                  LTE_LC_SYSTEM_MODE_PREFER_AUTO);
     
     if (err) {
+        LOG_ERR("NTN system mode set failed: %d", err);
         return err;
     }
+
+    ctx->ntn_initialized = true;
 
     return 0;
 }
@@ -175,6 +195,8 @@ int ntn_service_init(void)
         return 0;
     }
 
+    ntn_register_handler(ntn_evt_handler);
+
     initialized = true;
     return 0;
 }
@@ -184,11 +206,13 @@ int ntn_service_connect(struct app_ctx *ctx)
 {
     int err;
 
-    LOG_INF("hello from ntn_service_connect");
+    LOG_INF("Starting NTN connect");
 
     if (!initialized) {
         return -EINVAL;
     }
+
+    active_ctx = ctx;
 
     err = ntn_service_prepare(ctx);
     if (err) {
