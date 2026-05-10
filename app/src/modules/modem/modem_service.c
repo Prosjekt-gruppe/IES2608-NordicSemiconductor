@@ -7,7 +7,7 @@
 #include "app_events.h"
 
 #include <modem/nrf_modem_lib.h>
-#include <modem/lte_lc.h>
+//#include <modem/lte_lc.h>
 #include "modem_service.h"
 #include <nrf_modem_at.h>
 
@@ -254,6 +254,33 @@ int modem_service_udp_send_burst(const struct udp_test_cfg *cfg)
 
     zsock_close(sock);
     return 0;
+}
+
+int modem_service_conn_eval_get(struct lte_lc_conn_eval_params *params)
+{
+    int err;
+
+    if (params == NULL) {
+        return -EINVAL;
+    }
+
+    err = lte_lc_conn_eval_params_get(params);
+    if (err) {
+        LOG_WRN("conn eval get failed: %d", err);
+        return err;
+    }
+
+    LOG_INF("conn eval: rrc=%d energy=%d tau=%d ce=%d",
+            params->rrc_state, params->energy_estimate,
+            params->tau_trig, params->ce_level);
+    LOG_INF("conn eval: rsrp=%d rsrq=%d snr=%d dl_pl=%d tx_pwr=%d tx_rep=%d rx_rep=%d",
+            params->rsrp, params->rsrq, params->snr, params->dl_pathloss,
+            params->tx_power, params->tx_rep, params->rx_rep);
+    LOG_INF("conn eval: earfcn=%d band=%d phy_cid=%d cell_id=%u mcc=%d mnc=%d",
+            params->earfcn, params->band, params->phy_cid, params->cell_id,
+            params->mcc, params->mnc);
+
+    return err;
 }
 
 

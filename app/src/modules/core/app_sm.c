@@ -27,6 +27,7 @@
 #include <zephyr/logging/log.h>
 #include <zephyr/smf.h>
 #include <zephyr/zbus/zbus.h>
+#include <modem/lte_lc.h>
 
 LOG_MODULE_REGISTER(app_sm, LOG_LEVEL_INF);
 
@@ -255,6 +256,7 @@ static const char *rat_name(enum rat rat)
     }
 }
 
+
 static void boot_entry(void *obj)
 {
     struct app_ctx *ctx = obj;
@@ -473,12 +475,20 @@ static void connected_exit(void *obj)
 
 static void ltem_connecting_entry(void *obj)
 {
-    ARG_UNUSED(obj);
+    struct app_ctx *ctx = obj;
 
     LOG_WRN("ENTER: STATE_LTEM_CONNECTING");
 
+    if (ctx->active_rat == RAT_NTN) {
+        int err = modem_service_switch_to_tn();
+        if (err) {
+            LOG_WRN("switch_to_tn failed during NTN->TN recovery: %d", err);
+            /* continue anyway? maybe full LTE connect still works */
+        }
+    }
+
     int err = lte_service_connect_async();
-    if (err){
+    if (err) {
         LOG_ERR("lte_service_connect_async err=%d", err); 
         struct app_event ev = {
             .type = EVT_REG_FAIL,
@@ -565,6 +575,13 @@ static void ltem_connected_entry(void *obj)
             LOG_WRN("Failed to start LTE signal monitor: %d", err);
         }
 
+    struct lte_lc_conn_eval_params conn_eval = {0};
+
+    err = modem_service_conn_eval_get(&conn_eval);
+    if (err) {
+        LOG_WRN("DEBUG CONEVAL test failed: %d", err);
+    }
+
 #if defined(CONFIG_APP_DEBUG_CORE_UDP_BURST_TEST)
     struct udp_test_cfg test_cfg = {
         .payload_len = 32,
@@ -615,7 +632,7 @@ static void ltem_connected_entry(void *obj)
 
         LOG_INF("LTEM_CONNECTED: requesting cloud connect");
         int pub_err = app_event_put(&ev, K_NO_WAIT);
-        LOG_INF("app_event_put(EVT_START_LTE_LOC) -> %d", pub_err); 
+        //LOG_INF("app_event_put(EVT_START_LTE_LOC) -> %d", pub_err); 
         return;
     }
 
@@ -626,7 +643,7 @@ static void ltem_connected_entry(void *obj)
 
         LOG_INF("LTEM_CONNECTED: requesting LTE location");
         int pub_err = app_event_put(&ev, K_MSEC(10));
-        LOG_INF("app_event_put(EVT_START_LTE_LOC) -> %d", pub_err);
+        //LOG_INF("app_event_put(EVT_START_LTE_LOC) -> %d", pub_err);
         return;
     }
 
@@ -636,7 +653,7 @@ static void ltem_connected_entry(void *obj)
         };
         LOG_INF("LTEM_CONNECTED: requesting GNSS acquire");
         int pub_err = app_event_put(&ev, K_NO_WAIT);
-        LOG_INF("app_event_put(EVT_START_LTE_LOC) -> %d", pub_err);
+        //LOG_INF("app_event_put(EVT_START_LTE_LOC) -> %d", pub_err);
         return; 
     }
 }
@@ -704,7 +721,7 @@ static enum smf_state_result ltem_connected_run(void *obj)
 
     default:
         /* send unkown events to parent state */
-        LOG_INF("unkown event arrived should propagate to parent node");
+        //LOG_INF("unkown event arrived should propagate to parent node");
         return SMF_EVENT_PROPAGATE;
     }
 }
@@ -1182,15 +1199,23 @@ static void lte_probe_entry(void *obj)
 {
     int err;
     struct app_ctx *ctx = obj;
-    
-    /* enable lte-service probe event on rsrp */
+
     lte_service_set_probe_pending(true);
-    
-    /* switch to tn network */
+
     err = modem_service_switch_to_tn();
     if (err) {
-        LOG_INF("switch to tn lte probe fault");
+        LOG_WRN("TN switch failed, attempting NTN restore");
+
         lte_service_set_probe_pending(false);
+
+        err = modem_service_switch_to_ntn();
+        if (err) {
+            ctx->next_rat = RAT_NTN;
+            transition_to_state(ctx, STATE_NTN_CONNECTING);
+            return;
+        }
+
+        ctx->active_rat = RAT_NTN;
         transition_to_state(ctx, STATE_NTN_CONNECTED);
         return;
     }
@@ -1209,11 +1234,20 @@ static enum smf_state_result lte_probe_run(void *obj)
         return SMF_EVENT_HANDLED;
         
     case EVT_LTE_POOR:
-        LOG_INF("LTE probe: TN still bad -> staying on NTN");
+        LOG_INF("LTE probe: TN still bad -> returning to NTN");
 
-        /* return to NTN */
-        modem_service_switch_to_ntn();
+        lte_service_set_probe_pending(false);
 
+        err = modem_service_switch_to_ntn();
+        if (err) {
+            LOG_WRN("Could not resume NTN context -> full NTN reconnect");
+            ctx->pdn_up = false;
+            ctx->next_rat = RAT_NTN;
+            transition_to_state(ctx, STATE_NTN_CONNECTING);
+            return SMF_EVENT_HANDLED;
+        }
+
+        ctx->active_rat = RAT_NTN;
         transition_to_state(ctx, STATE_NTN_CONNECTED);
         return SMF_EVENT_HANDLED;
 
@@ -1224,39 +1258,84 @@ static enum smf_state_result lte_probe_run(void *obj)
         err = modem_service_udp_send_test();
         
         if (err) {
-            LOG_ERR("UDP test failed: %d", err);
-            
-            modem_service_switch_to_ntn();
-            transition_to_state(ctx, STATE_NTN_CONNECTED);
+            LOG_ERR("UDP test failed: %d, TN context not valid", err);
+
+            ctx->pdn_up = false;
+            ctx->lte_connected = false;
+            ctx->next_rat = RAT_LTEM;
+
+            lte_service_set_probe_pending(false);
+
+            transition_to_state(ctx, STATE_LTEM_CONNECTING);
             return SMF_EVENT_HANDLED;
         }
-    
-        LOG_INF("UDP TEST OK");
-    
-    
-        /* should probably go to LTEM_CONNECTING/CONNECTED but for this test its ok */
-        ctx->next_rat = RAT_LTEM;
 
-        /*
-         * TODO: Might have to do a check here to see if context 
-         *       was preserved successfully, If not it might have
-         *       to reconnect to STATE_LTEM_CONNECTING again.
-         */
+        LOG_INF("UDP TEST OK: TN context appears valid");
+
+        ctx->active_rat = RAT_LTEM;
+        ctx->next_rat = RAT_LTEM;
+        ctx->pdn_up = true;
+        ctx->lte_connected = true;
+
+        lte_service_set_probe_pending(false);
 
         transition_to_state(ctx, STATE_LTEM_CONNECTED);
         return SMF_EVENT_HANDLED;
+    
 
-    case EVT_TN_READY_FOR_PROBE:
+    case EVT_TN_READY_FOR_PROBE: {
         LOG_INF("something");
+
+        struct lte_lc_conn_eval_params conn_eval = {0};
+        
+        err = modem_service_conn_eval_get(&conn_eval);
+        if (err) {
+            LOG_WRN("LTE probe conn eval failed: %d", err);
+            lte_service_set_probe_pending(false);
+
+            err = modem_service_switch_to_ntn();
+            if (err) {
+                LOG_WRN("Could not resume NTN after conn eval fail -> full NTN reconnect");
+                ctx->next_rat = RAT_NTN;
+                transition_to_state(ctx, STATE_NTN_CONNECTING);
+                return SMF_EVENT_HANDLED;
+            }
+
+            ctx->active_rat = RAT_NTN;
+            transition_to_state(ctx, STATE_NTN_CONNECTED);
+            return SMF_EVENT_HANDLED;
+        }
 
         /* start rsrp probe with n attempts */
         err = rsrp_service_start_probe(3);
         if (err < 0) {
             LOG_ERR("rsrp_service_start_probe failed: %d", err);
-            modem_service_switch_to_ntn();
-            transition_to_state(ctx, STATE_NTN_CONNECTED);
-        }
 
+            lte_service_set_probe_pending(false);
+
+            err = modem_service_switch_to_ntn();
+            if (err) {
+                ctx->next_rat = RAT_NTN;
+                transition_to_state(ctx, STATE_NTN_CONNECTING);
+                return SMF_EVENT_HANDLED;
+            }
+
+            ctx->active_rat = RAT_NTN;
+            transition_to_state(ctx, STATE_NTN_CONNECTED);
+            return SMF_EVENT_HANDLED;
+        }
+        return SMF_EVENT_HANDLED;
+    }
+    case EVT_PDN_DOWN:
+    case EVT_REG_FAIL:
+        LOG_WRN("LTE probe lost PDN/registration -> reconnect LTE-M");
+        lte_service_set_probe_pending(false);
+
+        ctx->pdn_up = false;
+        ctx->lte_connected = false;
+        ctx->next_rat = RAT_LTEM;
+
+        transition_to_state(ctx, STATE_LTEM_CONNECTING);
         return SMF_EVENT_HANDLED;
 
     default:
