@@ -49,10 +49,20 @@ static int ntn_service_set_location(const struct app_ctx *ctx, uint32_t validity
 
 static void ntn_location_work_handler(struct k_work *work)
 {
+    int err;
+
     ARG_UNUSED(work);
 
     if (active_ctx != NULL) {
-        (void)ntn_service_set_location(active_ctx, 0);
+        err = ntn_service_set_location(active_ctx, 0);
+        if (err) {
+            struct app_event ev = {
+                .type = EVT_MODEM_SWITCH_FAIL,
+                .source_rat = RAT_NTN,
+            };
+
+            (void)app_event_put(&ev, K_NO_WAIT);
+        }
     }
 }
 
@@ -171,9 +181,9 @@ static int ntn_service_prepare(struct app_ctx *ctx)
         return err;
     }
 
-    err = ntn_service_set_location(ctx, 0);
-    if (err) {
-        return err;
+    if (!ctx->have_fix) {
+        LOG_ERR("Cannot start NTN without a GNSS fix");
+        return -ENODATA;
     }
 
     err = lte_lc_system_mode_set(LTE_LC_SYSTEM_MODE_NTN_NBIOT,
