@@ -5,7 +5,6 @@
  */
 #include "app_sm.h"
 #include "app_events.h"
-#include "app_zbus.h"
 #include "rsrp_service.h"
 
 
@@ -35,7 +34,6 @@ ZBUS_MSG_SUBSCRIBER_DEFINE(app_fsm_sub); //Subscriber for app events
 
 union app_sm_msg {
     struct app_event app_event;
-    struct app_gnss_status gnss_status;
 };
 
 static void boot_entry(void *obj);
@@ -87,9 +85,6 @@ static void running_entry(void *obj);
 static enum smf_state_result running_run(void *obj);
 static void running_exit(void *obj);
 
-
-static void __maybe_unused handle_gnss_status(struct app_ctx *ctx,
-                                              const struct app_gnss_status *status);
 
 static void dispatch_app_event(struct app_ctx *ctx, const struct app_event *ev);
 static void backoff_timer_handler(struct k_timer *timer);
@@ -1160,41 +1155,6 @@ static void ntn_connected_exit(void *obj)
     ARG_UNUSED(obj);
 }
 
-static void __maybe_unused handle_gnss_status(struct app_ctx *ctx,
-                                              const struct app_gnss_status *status)
-{
-    struct app_event ev = {0};
-    
-    switch (status->state) {
-        case APP_GNSS_STATE_FIX:
-        ev.type = EVT_GNSS_FIX;
-        ev.pvt.latitude = status->latitude;
-        ev.pvt.longitude = status->longitude;
-        ev.pvt.altitude = status->altitude;
-        dispatch_app_event(ctx, &ev);
-        return;
-        
-        case APP_GNSS_STATE_TIMEOUT:
-        ev.type = EVT_TIMEOUT;
-        dispatch_app_event(ctx, &ev);
-        return;
-        
-        case APP_GNSS_STATE_ERROR:
-        LOG_WRN("GNSS reported error %d, treating as timeout", status->err);
-        ev.type = EVT_TIMEOUT;
-        dispatch_app_event(ctx, &ev);
-        return;
-        
-        default:
-        LOG_INF("GNSS status update: state=%d satellites=%u ttff_ms=%lld",
-            status->state,
-            status->tracked_satellites,
-            (long long)status->time_to_first_fix_ms);
-            return;
-        }
-    }
-    //#endif
-    
 static void lte_probe_entry(void *obj)
 {
     int err;
@@ -1462,13 +1422,6 @@ static void smf_thread(void *p1, void *p2, void *p3)
             //app_sm_post_dispatch(ctx, &msg.app_event);
             continue;
         }
-
-        /*
-        if (chan == &gnss_status_chan) {
-            handle_gnss_status(ctx, &msg.gnss_status);
-            continue;
-        }
-        */
 
         LOG_WRN("Received message from unexpected channel: %s", zbus_chan_name(chan));
     }

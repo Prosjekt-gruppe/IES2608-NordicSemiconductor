@@ -55,6 +55,10 @@ static void cloud_event_handler(const struct nrf_cloud_evt *evt)
             LOG_INF("Cloud transport connected");
             break; 
 
+        case NRF_CLOUD_EVT_USER_ASSOCIATED:
+            LOG_INF("Cloud user associated");
+            break;
+
         case NRF_CLOUD_EVT_READY: 
             cloud_connecting = false;
             cloud_connected = true; 
@@ -92,6 +96,10 @@ static void cloud_event_handler(const struct nrf_cloud_evt *evt)
                     LOG_ERR("A-GNSS processing failed: %d", err);
                 }
             }
+            break;
+
+        case NRF_CLOUD_EVT_RX_DATA_SHADOW:
+            LOG_INF("Cloud shadow data received");
             break;
 
         default:
