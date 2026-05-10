@@ -815,17 +815,15 @@ static enum smf_state_result lte_location_run(void *obj)
 
     switch (ctx->ev.type){
         case EVT_LTE_LOC_OK:
-            ctx->last_pvt = ctx->ev.pvt;
-            ctx->have_fix = true; 
             ctx->last_done = STEP_LTE_LOC_DONE;
 
             ctx->gnss_goal = GNSS_GOAL_REFINE_LTE_FIX;
             ctx->gnss_timeout_sec = CONFIG_APP_GNSS_TIMEOUT_SEC;
             ctx->gnss_extend_once = false; 
 
-            LOG_INF("LTE location fix stored: lat=%f lon=%f",
-                (double)ctx->last_pvt.latitude,
-                (double)ctx->last_pvt.longitude);
+            LOG_INF("LTE location estimate received: lat=%f lon=%f",
+                (double)ctx->ev.pvt.latitude,
+                (double)ctx->ev.pvt.longitude);
             
             LOG_WRN("TRANSITION: STATE_LTE_LOCATION -> STATE_LTEM_CONNECTED");
             transition_to_state(ctx, STATE_LTEM_CONNECTED);
