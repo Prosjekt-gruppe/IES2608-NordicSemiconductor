@@ -11,8 +11,9 @@
 #include <zephyr/smf.h>
 
 enum rat {
-    RAT_LTEM,
-    RAT_NTN
+    RAT_LTEM = 0,
+    RAT_NTN = 1,
+    RAT_UNKNOWN = 255
 };
 
 struct retry_state {
@@ -23,16 +24,21 @@ struct retry_state {
 
 enum app_state {
     STATE_BOOT,
-    STATE_IDLE,
-    STATE_GNSS_ACQUIRE,
-    STATE_NTN_CONNECTING,
-    STATE_NTN_CONNECTED,
-    STATE_LTEM_CONNECTING,
-    STATE_LTEM_CONNECTED,
-    STATE_CLOUD_CONNECTING,
-    STATE_LTE_LOCATION,
-    STATE_LTE_PROBE,
-    STATE_BACKOFF,
+    STATE_RUNNING, // parent state
+
+        STATE_DISCONNECTED,
+            STATE_BACKOFF,
+            STATE_LTEM_CONNECTING,
+            STATE_NTN_CONNECTING,
+
+        STATE_CONNECTED,
+            STATE_LTEM_CONNECTED,
+            STATE_CLOUD_CONNECTING,
+            STATE_LTE_LOCATION,
+            STATE_GNSS_ACQUIRE,
+            STATE_NTN_CONNECTED,
+            STATE_LTE_PROBE,
+            STATE_IDLE,
 };
 
 
@@ -82,6 +88,7 @@ enum gnss_goal {
 
 struct app_event {
     enum app_evt_type type;
+    enum rat source_rat;
     union {
         struct nrf_modem_gnss_pvt_data_frame pvt;
         struct { enum rat rat; } reg;
@@ -138,6 +145,8 @@ struct app_ctx {
 
     /* pdn */
     bool pdn_up;
+
+    bool ignore_next_reg_fail;
     
 };
 

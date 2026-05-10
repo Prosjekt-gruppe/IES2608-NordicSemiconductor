@@ -7,8 +7,12 @@
 #include "app_events.h"
 
 #include <modem/nrf_modem_lib.h>
-#include <modem/lte_lc.h>
+//#include <modem/lte_lc.h>
 #include "modem_service.h"
+#include <nrf_modem_at.h>
+
+
+
 #include <zephyr/net/socket.h>
 #include <arpa/inet.h>
 #include <errno.h>
@@ -38,49 +42,65 @@ enum modem_access_mode {
     MODEM_ACCESS_NTN,
 };
 
+
+
 LOG_MODULE_REGISTER(modem_service, LOG_LEVEL_INF);
 
-static int modem_system_mode_set(enum modem_access_mode mode)
+
+static int modem_at_ok(const char *cmd)
 {
-    switch (mode) {
-    case MODEM_ACCESS_TN:
-        LOG_INF("switch: setting terrestrial system mode");
-        return lte_lc_system_mode_set(LTE_LC_SYSTEM_MODE_LTEM_NBIOT_GPS,
-                                      LTE_LC_SYSTEM_MODE_PREFER_LTEM_PLMN_PRIO);
+    int err = nrf_modem_at_printf("%s", cmd);
 
-    case MODEM_ACCESS_NTN:
-        LOG_INF("switch: setting NTN NB-IoT system mode");
-        return lte_lc_system_mode_set(LTE_LC_SYSTEM_MODE_NTN_NBIOT,
-                                      LTE_LC_SYSTEM_MODE_PREFER_AUTO);
-
-    default:
-        return -EINVAL;
+    if (err == 0) {
+        LOG_INF("AT ok: %s", cmd);
+        return 0;
     }
+
+    if (err > 0) {
+        LOG_ERR("AT failed: %s (raw=%d, at_err=%d)", cmd, err, nrf_modem_at_err(err));
+        return err;
+    }
+
+    LOG_ERR("AT failed: %s (lib err=%d)", cmd, err);
+    return err;
 }
 
 static int modem_service_switch(enum modem_access_mode mode)
 {
     int err;
 
-    LOG_INF("switch: powering modem off before system mode change");
-    err = lte_lc_power_off();
+    LOG_INF("switch: sending CFUN=45");
+    err = modem_at_ok("AT+CFUN=45");
+    LOG_INF("switch: CFUN=45 ret=%d", err);
     if (err) {
-        LOG_ERR("switch: lte_lc_power_off failed: %d", err);
         return err;
     }
 
-    err = modem_system_mode_set(mode);
+    switch (mode) {
+    case MODEM_ACCESS_TN:
+        LOG_INF("switch: sending XSYSTEMMODE TN");
+        err = modem_at_ok("AT%XSYSTEMMODE=1,0,0,0,0");
+        LOG_INF("switch: XSYSTEMMODE TN ret=%d", err);
+        break;
+
+    case MODEM_ACCESS_NTN:
+        LOG_INF("switch: sending XSYSTEMMODE NTN");
+        err = modem_at_ok("AT%XSYSTEMMODE=0,0,0,0,1");
+        LOG_INF("switch: XSYSTEMMODE NTN ret=%d", err);
+        break;
+
+    default:
+        LOG_INF("modem service switch default case");
+        return -EINVAL;
+    }
+
     if (err) {
-        LOG_ERR("switch: system mode set failed: %d", err);
         return err;
     }
 
-    LOG_INF("switch: bringing modem back to normal mode");
-    err = lte_lc_normal();
-    if (err) {
-        LOG_ERR("switch: lte_lc_normal failed: %d", err);
-    }
-
+    LOG_INF("switch: sending CFUN=1");
+    err = modem_at_ok("AT+CFUN=1");
+    LOG_INF("switch: CFUN=1 ret=%d", err);
     return err;
 }
 
@@ -234,6 +254,33 @@ int modem_service_udp_send_burst(const struct udp_test_cfg *cfg)
 
     zsock_close(sock);
     return 0;
+}
+
+int modem_service_conn_eval_get(struct lte_lc_conn_eval_params *params)
+{
+    int err;
+
+    if (params == NULL) {
+        return -EINVAL;
+    }
+
+    err = lte_lc_conn_eval_params_get(params);
+    if (err) {
+        LOG_WRN("conn eval get failed: %d", err);
+        return err;
+    }
+
+    LOG_INF("conn eval: rrc=%d energy=%d tau=%d ce=%d",
+            params->rrc_state, params->energy_estimate,
+            params->tau_trig, params->ce_level);
+    LOG_INF("conn eval: rsrp=%d rsrq=%d snr=%d dl_pl=%d tx_pwr=%d tx_rep=%d rx_rep=%d",
+            params->rsrp, params->rsrq, params->snr, params->dl_pathloss,
+            params->tx_power, params->tx_rep, params->rx_rep);
+    LOG_INF("conn eval: earfcn=%d band=%d phy_cid=%d cell_id=%u mcc=%d mnc=%d",
+            params->earfcn, params->band, params->phy_cid, params->cell_id,
+            params->mcc, params->mnc);
+
+    return err;
 }
 
 

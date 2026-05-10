@@ -34,16 +34,16 @@ config APP_MODEM_SIGNAL_POLL_INTERVAL_STILL_SEC
 
 config APP_MODEM_RSRP_FALLBACK_DBM
     int "LTE-M RSRP threshold for NTN fallback"
-    default -105
+    default -120
     range -140 -44
     help
       When the measured LTE-M RSRP is at or below this level and continues
       to worsen, the modem service requests NTN fallback.
 
 config APP_MODEM_RSRP_RECOVERY_DBM
-    int "NTE->LTE recovery threshold"
-    default -90
-    range -120 -10
+    int "NTN->LTE recovery threshold"
+    default -110
+    range -130 -10
     help
       When LTE-M RSRP is showing signs of improving this value
       decides if it should return to LTE-M-Connetion or not.
@@ -74,15 +74,6 @@ config APP_MODEM_RSRP_WEAK_SAMPLE_COUNT
       Number of consecutive valid RSRP samples at or below the fallback
       threshold needed before the modem service requests NTN fallback, even if
       the signal is not actively dropping anymore.
-
-config APP_NTN_PROBE_INTERVAL_SEC
-    int "NTN LTE-M probe interval in seconds"
-    default 60
-    range 0 86400
-    help
-      While connected over NTN, periodically switch back to TN long enough
-      to measure LTE-M RSRP and test the LTE data path. Set to 0 to disable
-      automatic probing while on NTN.
 
 config APP_SENSOR_ACCEL_DEMO
     bool "Enable accelerometer demo"
