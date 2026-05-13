@@ -182,6 +182,13 @@ config APP_MAX_NTN_RETRIES
     help
       Set NTN retries.
 
+config APP_NTN_CONNECT_TIMEOUT_SEC
+    int "NTN attach timeout in seconds"
+    default 180
+    range 30 1800
+    help
+      Maximum time to wait for NTN attach/registration before retrying.
+
 config APP_MAX_LTEM_RETRIES
     int "Set maximum retry connection attempts for LTEM"
     default 3

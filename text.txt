@@ -1,0 +1,39 @@
+wlt@touga:ies2608/project % ies2608 --run-coverage    
+Warning: Shell command "bash" used. You may have intended to use --shell or --terminal.
+INFO    - Using Ninja..
+INFO    - Zephyr version: ncs-v3.2.4
+INFO    - Using 'zephyr' toolchain.
+INFO    - Building initial testsuite list...
+INFO    - Writing JSON report tests/twister-out/testplan.json
+INFO    - JOBS: 8
+INFO    - Adding tasks to the queue...
+INFO    - Added initial list of jobs to queue
+ERROR   - unit_testing/unit_testing app.lte_service.logic                              ERROR: Build failure
+ERROR   - see: /home/wlt/dev/ies2608/project/tests/twister-out/unit_testing_unit_testing/host/project/tests/modules/lte_service/app.lte_service.logic/build.log
+ERROR   - unit_testing/unit_testing app.gnss_service.logic                             ERROR: Build failure
+ERROR   - see: /home/wlt/dev/ies2608/project/tests/twister-out/unit_testing_unit_testing/host/project/tests/modules/gnss_service/app.gnss_service.logic/build.log
+INFO    - Total complete:    6/   6  100%  built (not run):    0, filtered:    0, failed:    0, error:    2
+INFO    - 6 test scenarios (6 configurations) selected, 0 configurations filtered (0 by static filter, 0 at runtime).
+INFO    - 4 of 6 executed test configurations passed (66.67%), 0 built (not run), 0 failed, 2 errored, with no warnings in 12.13 seconds.
+INFO    - 33 of 45 executed test cases passed (73.33%), 12 blocked on 1 out of total 1204 platforms (0.08%).
+INFO    - 4 test configurations executed on platforms, 2 test configurations were only built.
+INFO    - HTML report generated: tests/twister-out/coverage/index.html
+INFO    - Saving reports...
+INFO    - Writing JSON report /home/wlt/dev/ies2608/project/tests/twister-out/twister.json
+INFO    - Writing xunit report /home/wlt/dev/ies2608/project/tests/twister-out/twister.xml...
+INFO    - Writing xunit report /home/wlt/dev/ies2608/project/tests/twister-out/twister_report.xml...
+INFO    - -+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+INFO    - The following issues were found (showing the top 10 items):
+INFO    - 1) app.gnss_service.logic on unit_testing/unit_testing error (Build failure - error: nrf_modem_gnss.h: No such file or directory)
+INFO    - 2) app.lte_service.logic on unit_testing/unit_testing error (Build failure - error: modem/lte_lc.h: No such file or directory)
+INFO    - 
+INFO    - To rerun the tests, call twister using the following commandline:
+INFO    - west twister -p <PLATFORM> -s <TEST ID>, for example:
+INFO    - 
+INFO    - west twister -p unit_testing/unit_testing -s app.lte_service.logic
+INFO    - or with west:
+INFO    - west build -p -b unit_testing/unit_testing tests/modules/lte_service -T app.lte_service.logic
+INFO    - -+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+INFO    - Run completed
+Error: Launched process exited with non-zero status: 1
+wlt@touga:ies2608/project % 

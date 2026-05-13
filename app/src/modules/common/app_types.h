@@ -138,6 +138,7 @@ struct app_ctx {
     /* timers */
     struct k_timer backoff_timer;
     struct k_timer ntn_timer;
+    struct k_timer ntn_connect_timer;
     struct k_timer lte_timer;
 
     struct k_timer handoff_timer;

@@ -90,6 +90,7 @@ static void dispatch_app_event(struct app_ctx *ctx, const struct app_event *ev);
 static void backoff_timer_handler(struct k_timer *timer);
 
 static void ntn_timer_handler(struct k_timer *timer);
+static void ntn_connect_timer_handler(struct k_timer *timer);
 static void ltem_timer_handler(struct k_timer *timer);
 static void handoff_timer_handler(struct k_timer *timer); 
 static const char *rat_name(enum rat rat);
@@ -304,6 +305,7 @@ static void boot_entry(void *obj)
     /* init timers */
     k_timer_init(&ctx->backoff_timer, backoff_timer_handler, NULL);
     k_timer_init(&ctx->ntn_timer, ntn_timer_handler, NULL);
+    k_timer_init(&ctx->ntn_connect_timer, ntn_connect_timer_handler, NULL);
     k_timer_init(&ctx->lte_timer, ltem_timer_handler, NULL);
     k_timer_init(&ctx->handoff_timer, handoff_timer_handler, NULL);
     
@@ -979,6 +981,7 @@ static void gnss_acquire_exit(void *obj)
 static void ntn_connecting_entry(void *obj)
 {
     struct app_ctx *ctx = obj;
+    int32_t timeout_sec = CONFIG_APP_NTN_CONNECT_TIMEOUT_SEC;
 
     int err = ntn_service_connect(ctx);
 
@@ -991,6 +994,15 @@ static void ntn_connecting_entry(void *obj)
         (void)app_event_put(&ev, K_NO_WAIT);
         return;
     }
+
+    if (timeout_sec <= 0) {
+        timeout_sec = 1;
+    }
+
+    LOG_INF("NTN connect timeout armed: %d sec", timeout_sec);
+    k_timer_start(&ctx->ntn_connect_timer,
+                  K_SECONDS(timeout_sec),
+                  K_NO_WAIT);
 
     LOG_INF("(%s) ntn connect started", __func__);
 }
@@ -1080,11 +1092,26 @@ static enum smf_state_result ntn_connecting_run(void *obj)
 static void ntn_connecting_exit(void *obj)
 {
     ARG_UNUSED(obj);
+    struct app_ctx *ctx = obj;
+    k_timer_stop(&ctx->ntn_connect_timer);
 }
 
 static void ntn_timer_handler(struct k_timer *timer)
 {
     ARG_UNUSED(timer);
+
+    struct app_event ev = {
+        .type = EVT_TIMEOUT
+    };
+
+    (void)app_event_put(&ev, K_NO_WAIT);
+}
+
+static void ntn_connect_timer_handler(struct k_timer *timer)
+{
+    ARG_UNUSED(timer);
+
+    LOG_WRN("NTN connect timeout expired");
 
     struct app_event ev = {
         .type = EVT_TIMEOUT
