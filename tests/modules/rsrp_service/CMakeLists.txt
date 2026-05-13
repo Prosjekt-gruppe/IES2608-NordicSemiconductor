@@ -15,5 +15,6 @@ target_include_directories(testbinary PRIVATE
 
 target_sources(testbinary PRIVATE
     src/main.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../../app/src/modules/rsrp/rsrp_monitor.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../../../app/src/modules/rsrp/rsrp_parse.c
 )

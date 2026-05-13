@@ -17,6 +17,7 @@ target_sources(app PRIVATE src/main.c
     src/modules/lte/lte_service.c
     src/modules/modem/modem_service.c
     src/modules/ntn/ntn_service.c
+    src/modules/rsrp/rsrp_monitor.c
     src/modules/rsrp/rsrp_parse.c
     src/modules/rsrp/rsrp_service.c
     src/modules/location/location_service.c

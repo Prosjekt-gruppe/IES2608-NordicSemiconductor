@@ -33,6 +33,10 @@ int rsrp_parse_cesq_rsrp(const char *response, int *rsrp_dbm)
 		return -ENOENT;
 	}
 
+	if (rsrp_raw > 97) {
+		return -ERANGE;
+	}
+
 	if (rsrp_raw == 0) {
 		*rsrp_dbm = -141;
 		return 0;

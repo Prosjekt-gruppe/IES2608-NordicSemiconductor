@@ -6,6 +6,7 @@
 
 #include "rsrp_service.h"
 #include "app_events.h"
+#include "rsrp_monitor.h"
 #include "rsrp_parse.h"
 
 #include <errno.h>
@@ -28,9 +29,7 @@
 
 LOG_MODULE_REGISTER(rsrp_service, LOG_LEVEL_INF);
 
-#define RSRP_HISTORY_LEN 6
 #define PROBE_POLL_MSEC 500
-#define RSRP_UNKNOWN_DBM CONFIG_APP_MODEM_RSRP_FALLBACK_DBM
 
 enum rsrp_mode {
 	RSRP_MODE_IDLE,		
@@ -46,24 +45,22 @@ static bool service_initialized;
 static bool lte_poor_event_sent;
 static bool has_motion_hint;
 static bool motion_hint_is_moving;
-static int last_rsrp_dbm = INT32_MIN;
 static uint32_t motion_speed_mm_s;
 static uint32_t motion_linear_accel_mg;
 static uint32_t monitor_poll_interval_sec = CONFIG_APP_MODEM_SIGNAL_POLL_INTERVAL_SEC;
 
-static int rsrp_history_dbm[RSRP_HISTORY_LEN];
-static uint8_t rsrp_history_next_idx;
-static uint8_t rsrp_history_count;
-static uint8_t weak_sample_count;
-static uint8_t unavailable_sample_count;
+static struct rsrp_monitor_state rsrp_monitor;
+
+static const struct rsrp_monitor_config rsrp_monitor_config = {
+	.fallback_dbm = CONFIG_APP_MODEM_RSRP_FALLBACK_DBM,
+	.drop_db = CONFIG_APP_MODEM_RSRP_DROP_DB,
+	.weak_sample_limit = CONFIG_APP_MODEM_RSRP_WEAK_SAMPLE_COUNT,
+	.unavailable_sample_limit = CONFIG_APP_MODEM_RSRP_LOSS_SAMPLE_COUNT,
+};
 
 static void reset_signal_tracking(void)
 {
-	last_rsrp_dbm = INT32_MIN;
-	rsrp_history_next_idx = 0U;
-	rsrp_history_count = 0U;
-	weak_sample_count = 0U;
-	unavailable_sample_count = 0U;
+	rsrp_monitor_reset(&rsrp_monitor);
 	lte_poor_event_sent = false;
 }
 
@@ -100,128 +97,33 @@ static uint32_t rsrp_target_poll_interval_sec(void)
 	return CONFIG_APP_MODEM_SIGNAL_POLL_INTERVAL_STILL_SEC;
 }
 
-static void rsrp_history_add(int rsrp_dbm)
-{
-	rsrp_history_dbm[rsrp_history_next_idx] = rsrp_dbm;
-	rsrp_history_next_idx = (rsrp_history_next_idx + 1U) % RSRP_HISTORY_LEN;
-
-	if (rsrp_history_count < RSRP_HISTORY_LEN) {
-		rsrp_history_count++;
-	}
-}
-
-static int rsrp_history_average(void)
-{
-	int sum = 0;
-
-	for (int i = 0; i < rsrp_history_count; i++) {
-		sum += rsrp_history_dbm[i];
-	}
-
-	return sum / rsrp_history_count;
-}
-
-static bool rsrp_trend_worsening(void)
-{
-	int oldest_idx;
-	int middle_idx;
-	int newest_idx;
-	int total_drop_db;
-
-	if (rsrp_history_count < 3U) {
-		return false;
-	}
-
-	newest_idx = (rsrp_history_next_idx + RSRP_HISTORY_LEN - 1) % RSRP_HISTORY_LEN;
-	middle_idx = (rsrp_history_next_idx + RSRP_HISTORY_LEN - 2) % RSRP_HISTORY_LEN;
-	oldest_idx = (rsrp_history_next_idx + RSRP_HISTORY_LEN - 3) % RSRP_HISTORY_LEN;
-
-	if (not ((rsrp_history_dbm[newest_idx] < rsrp_history_dbm[middle_idx]) and
-		 (rsrp_history_dbm[middle_idx] < rsrp_history_dbm[oldest_idx]))) {
-		return false;
-	}
-
-	total_drop_db = rsrp_history_dbm[newest_idx] - rsrp_history_dbm[oldest_idx];
-	if (total_drop_db > -CONFIG_APP_MODEM_RSRP_DROP_DB) {
-		return false;
-	}
-
-	LOG_WRN("LTE-M RSRP worsening: %d -> %d -> %d dBm",
-		rsrp_history_dbm[oldest_idx],
-		rsrp_history_dbm[middle_idx],
-		rsrp_history_dbm[newest_idx]);
-
-	return true;
-}
-
 static bool should_publish_lte_poor(int rsrp_dbm)
 {
-	bool weak_signal = rsrp_dbm <= CONFIG_APP_MODEM_RSRP_FALLBACK_DBM;
-	bool sharp_drop = false;
-	bool worsening;
-	bool weak_for_too_long = false;
-
-	if (weak_signal) {
-		if (weak_sample_count < UINT8_MAX) {
-			weak_sample_count++;
-		}
-
-		if (weak_sample_count >= CONFIG_APP_MODEM_RSRP_WEAK_SAMPLE_COUNT) {
-			LOG_WRN("LTE-M RSRP weak for %u/%u samples: %d dBm",
-				(unsigned int)weak_sample_count,
-				(unsigned int)CONFIG_APP_MODEM_RSRP_WEAK_SAMPLE_COUNT,
-				rsrp_dbm);
-			weak_for_too_long = true;
-		}
-	} else {
-		weak_sample_count = 0U;
-	}
-
-	if (last_rsrp_dbm != INT32_MIN) {
-		int delta_db = rsrp_dbm - last_rsrp_dbm;
-
-		if (delta_db <= -CONFIG_APP_MODEM_RSRP_DROP_DB) {
-			LOG_WRN("LTE-M RSRP dropped %d dB (%d -> %d)",
-				-delta_db, last_rsrp_dbm, rsrp_dbm);
-			sharp_drop = true;
-		}
-	}
-
-	rsrp_history_add(rsrp_dbm);
-	worsening = rsrp_trend_worsening();
-	last_rsrp_dbm = rsrp_dbm;
-
-	return weak_signal and (sharp_drop or worsening or weak_for_too_long);
+	return rsrp_monitor_record_signal_sample(&rsrp_monitor,
+						 &rsrp_monitor_config,
+						 rsrp_dbm);
 }
 
 static void record_rsrp_available(void)
 {
-	unavailable_sample_count = 0U;
+	rsrp_monitor_record_available(&rsrp_monitor);
 }
 
 static uint8_t record_rsrp_unavailable(void)
 {
-	weak_sample_count = 0U;
-
-	if (unavailable_sample_count < UINT8_MAX) {
-		unavailable_sample_count++;
-	}
-
-	return unavailable_sample_count;
+	return rsrp_monitor_record_unavailable(&rsrp_monitor);
 }
 
 static int rsrp_event_value_for_unavailable(void)
 {
-	if ((last_rsrp_dbm != INT32_MIN) and (last_rsrp_dbm < RSRP_UNKNOWN_DBM)) {
-		return last_rsrp_dbm;
-	}
-
-	return RSRP_UNKNOWN_DBM;
+	return rsrp_monitor_unavailable_event_value(&rsrp_monitor,
+						    &rsrp_monitor_config);
 }
 
 static bool rsrp_unavailable_limit_reached(void)
 {
-	return unavailable_sample_count >= CONFIG_APP_MODEM_RSRP_LOSS_SAMPLE_COUNT;
+	return rsrp_monitor_unavailable_limit_reached(&rsrp_monitor,
+						      &rsrp_monitor_config);
 }
 
 static void rsrp_work_handler(struct k_work *work)
@@ -236,12 +138,13 @@ static void rsrp_work_handler(struct k_work *work)
 	case RSRP_MODE_MONITOR:
 		err = rsrp_service_get(&rsrp_dbm);
 		if (err) {
-			(void)record_rsrp_unavailable();
+			uint8_t unavailable_count = record_rsrp_unavailable();
+
 			monitor_poll_interval_sec = rsrp_target_poll_interval_sec();
 
 			LOG_WRN("LTE-M RSRP unavailable: err=%d, count=%u/%u, next=%u s",
 				err,
-				(unsigned int)unavailable_sample_count,
+				(unsigned int)unavailable_count,
 				(unsigned int)CONFIG_APP_MODEM_RSRP_LOSS_SAMPLE_COUNT,
 				monitor_poll_interval_sec);
 
@@ -251,7 +154,7 @@ static void rsrp_work_handler(struct k_work *work)
 				rsrp_dbm = rsrp_event_value_for_unavailable();
 
 				LOG_WRN("LTE-M RSRP unavailable for %u samples, publishing LTE poor event",
-					(unsigned int)unavailable_sample_count);
+					(unsigned int)unavailable_count);
 				(void)publish_rsrp_event(EVT_LTE_POOR, rsrp_dbm);
 				return;
 			}
@@ -286,11 +189,11 @@ static void rsrp_work_handler(struct k_work *work)
 	case RSRP_MODE_PROBE:
 		err = rsrp_service_get(&rsrp_dbm);
 		if (err) {
-			(void)record_rsrp_unavailable();
+			uint8_t unavailable_count = record_rsrp_unavailable();
 
 			LOG_WRN("LTE probe RSRP unavailable: err=%d, count=%u/%u",
 				err,
-				(unsigned int)unavailable_sample_count,
+				(unsigned int)unavailable_count,
 				(unsigned int)CONFIG_APP_MODEM_RSRP_LOSS_SAMPLE_COUNT);
 
 			if (rsrp_unavailable_limit_reached()) {
@@ -308,17 +211,18 @@ static void rsrp_work_handler(struct k_work *work)
 
 		record_rsrp_available();
 
-		rsrp_history_add(rsrp_dbm);
+		rsrp_monitor_history_add(&rsrp_monitor, rsrp_dbm);
 
 		LOG_INF("LTE probe RSRP sample %u/%u: %d dBm",
-			rsrp_history_count, probe_sample_target, rsrp_dbm);
+			rsrp_monitor_history_count(&rsrp_monitor),
+			probe_sample_target, rsrp_dbm);
 
-		if (rsrp_history_count < probe_sample_target) {
+		if (rsrp_monitor_history_count(&rsrp_monitor) < probe_sample_target) {
 			k_work_reschedule(&rsrp_work, K_MSEC(PROBE_POLL_MSEC));
 			return;
 		}
 
-		probe_average_dbm = rsrp_history_average();
+		probe_average_dbm = rsrp_monitor_history_average(&rsrp_monitor);
 
 		if (probe_average_dbm >= CONFIG_APP_MODEM_RSRP_RECOVERY_DBM) {
 			publish_rsrp_event(EVT_LTE_GOOD, probe_average_dbm);
