@@ -6,11 +6,11 @@
 
 #include "rsrp_service.h"
 #include "app_events.h"
+#include "rsrp_parse.h"
 
 #include <errno.h>
 #include <iso646.h>
 #include <stdint.h>
-#include <stdio.h>
 
 #include <nrf_modem_at.h>
 #include <zephyr/kernel.h>
@@ -341,13 +341,6 @@ static void rsrp_work_handler(struct k_work *work)
 int rsrp_service_get(int *rsrp_dbm)
 {
 	char response[64];
-	int rxlev;
-	int ber;
-	int rscp;
-	int ecno;
-	int rsrq;
-	int rsrp_raw;
-	int parsed;
 	int err;
 
 	if (rsrp_dbm == NULL) {
@@ -361,29 +354,16 @@ int rsrp_service_get(int *rsrp_dbm)
 	}
 
 	LOG_DBG("CESQ response: %s", response);
-	// change to event based architecture (see lte_lc-lib?)	
-	// coneval supprted in link controller api	
-	parsed = sscanf(response, "+CESQ: %d,%d,%d,%d,%d,%d",	
-			&rxlev, &ber, &rscp, &ecno, &rsrq, &rsrp_raw);
-	if (parsed != 6) {
+	err = rsrp_parse_cesq_rsrp(response, rsrp_dbm);
+	if (err == -EIO) {
 		LOG_WRN("Failed to parse CESQ response");
-		return -EIO;
-	}
-
-	if (rsrp_raw == 255) {
+	} else if (err == -ENOENT) {
 		LOG_WRN("RSRP not known");
-		return -ENOENT;
-	}
-
-	if (rsrp_raw == 0) {
+	} else if ((err == 0) && (*rsrp_dbm == -141)) {
 		LOG_WRN("RSRP < -140 dBm");
-		*rsrp_dbm = -141;
-		return 0;
 	}
 
-	*rsrp_dbm = rsrp_raw - 141;
-
-	return 0;
+	return err;
 }
 
 int rsrp_service_sample_and_publish(void)

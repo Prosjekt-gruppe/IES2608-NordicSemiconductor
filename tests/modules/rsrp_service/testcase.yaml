@@ -1,0 +1,11 @@
+common:
+  tags:
+    - rsrp
+    - unit
+  type: unit
+tests:
+  app.rsrp_service.parse_cesq:
+    platform_allow:
+      - unit_testing
+    integration_platforms:
+      - unit_testing

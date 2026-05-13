@@ -45,6 +45,7 @@ fp-info-cache
 
 # Nordic settings
 build*/
+twister-out*/
 
 # VSCode settings
 .vscode/
