@@ -1,0 +1,11 @@
+common:
+  tags:
+    - ntn
+    - unit
+  type: unit
+tests:
+  app.ntn_service.logic:
+    platform_allow:
+      - unit_testing
+    integration_platforms:
+      - unit_testing

@@ -6,9 +6,9 @@
 
 #include "ntn_service.h"
 #include "app_events.h"
+#include "ntn_logic.h"
 
 #include <errno.h>
-#include <string.h>
 #include <nrf_modem_at.h>
 #include <modem/lte_lc.h>
 #include <modem/ntn.h>
@@ -17,23 +17,11 @@
 
 LOG_MODULE_REGISTER(ntn_service, LOG_LEVEL_INF);
 
-#define NTN_MODEM_FW_TOKEN "mfw_nrf9151-ntn"
-
 static bool initialized;
 static struct app_ctx *active_ctx;
 static void ntn_location_work_handler(struct k_work *work);
 
 K_WORK_DEFINE(ntn_location_work, ntn_location_work_handler);
-
-static void strip_at_response_line_end(char *response)
-{
-    for (char *p = response; *p != '\0'; p++) {
-        if (*p == '\r' || *p == '\n') {
-            *p = '\0';
-            return;
-        }
-    }
-}
 
 static int ntn_service_check_modem_fw(void)
 {
@@ -51,12 +39,12 @@ static int ntn_service_check_modem_fw(void)
         return -EFAULT;
     }
 
-    strip_at_response_line_end(fw_version);
+    ntn_logic_strip_at_response_line_end(fw_version);
     LOG_INF("Modem firmware for NTN: %s", fw_version);
 
-    if (strstr(fw_version, NTN_MODEM_FW_TOKEN) == NULL) {
+    if (!ntn_logic_modem_fw_supports_ntn(fw_version)) {
         LOG_ERR("NTN NB-IoT requires modem firmware %s; current firmware is %s",
-                NTN_MODEM_FW_TOKEN, fw_version);
+                NTN_LOGIC_MODEM_FW_TOKEN, fw_version);
         return -ENOTSUP;
     }
 
@@ -91,9 +79,10 @@ static int ntn_service_set_location(const struct app_ctx *ctx, uint32_t validity
 {
     int err;
 
-    if (!ctx->have_fix) {
+    err = ntn_logic_location_precheck(ctx->have_fix);
+    if (err) {
         LOG_WRN("No GNSS fix available for NTN location update");
-        return -ENODATA;
+        return err;
     }
 
     LOG_INF("Setting NTN location: lat=%f lon=%f alt=%f",
@@ -251,9 +240,10 @@ static int ntn_service_prepare(struct app_ctx *ctx)
         return err;
     }
 
-    if (!ctx->have_fix) {
+    err = ntn_logic_location_precheck(ctx->have_fix);
+    if (err) {
         LOG_ERR("Cannot start NTN without a GNSS fix");
-        return -ENODATA;
+        return err;
     }
 
     err = ntn_service_set_system_mode();

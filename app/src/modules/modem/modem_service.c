@@ -9,6 +9,7 @@
 #include <modem/nrf_modem_lib.h>
 //#include <modem/lte_lc.h>
 #include "modem_service.h"
+#include "modem_logic.h"
 #include <nrf_modem_at.h>
 
 
@@ -16,6 +17,7 @@
 #include <zephyr/net/socket.h>
 #include <arpa/inet.h>
 #include <errno.h>
+#include <string.h>
 #include <unistd.h>
 #include <zephyr/net/net_ip.h>
 
@@ -26,22 +28,15 @@
 #define SERVER_PORT 41313 // port 
 #define SERVER_ADDR "46.226.106.127" // tcpbin.net
 
-static struct k_work switch_work;
-static enum modem_switch_state switch_state;
-static bool initialized;
-
 enum modem_switch_state {
     MODEM_SWITCH_IDLE,
     MODEM_SWITCH_TO_TN,
     MODEM_SWITCH_TO_NTN,
 };
 
-
-enum modem_access_mode {
-    MODEM_ACCESS_TN,
-    MODEM_ACCESS_NTN,
-};
-
+static struct k_work switch_work;
+static enum modem_switch_state switch_state;
+static bool initialized;
 
 
 LOG_MODULE_REGISTER(modem_service, LOG_LEVEL_INF);
@@ -65,9 +60,10 @@ static int modem_at_ok(const char *cmd)
     return err;
 }
 
-static int modem_service_switch(enum modem_access_mode mode)
+static int modem_service_switch(enum modem_logic_access_mode mode)
 {
     int err;
+    const char *system_mode_cmd;
 
     LOG_INF("switch: sending CFUN=45");
     err = modem_at_ok("AT+CFUN=45");
@@ -76,23 +72,15 @@ static int modem_service_switch(enum modem_access_mode mode)
         return err;
     }
 
-    switch (mode) {
-    case MODEM_ACCESS_TN:
-        LOG_INF("switch: sending XSYSTEMMODE TN");
-        err = modem_at_ok("AT%XSYSTEMMODE=1,0,0,0,0");
-        LOG_INF("switch: XSYSTEMMODE TN ret=%d", err);
-        break;
-
-    case MODEM_ACCESS_NTN:
-        LOG_INF("switch: sending XSYSTEMMODE NTN");
-        err = modem_at_ok("AT%XSYSTEMMODE=0,0,0,0,1");
-        LOG_INF("switch: XSYSTEMMODE NTN ret=%d", err);
-        break;
-
-    default:
+    system_mode_cmd = modem_logic_system_mode_cmd(mode);
+    if (system_mode_cmd == NULL) {
         LOG_INF("modem service switch default case");
         return -EINVAL;
     }
+
+    LOG_INF("switch: sending XSYSTEMMODE");
+    err = modem_at_ok(system_mode_cmd);
+    LOG_INF("switch: XSYSTEMMODE ret=%d", err);
 
     if (err) {
         return err;
@@ -113,7 +101,7 @@ static void modem_switch_work_handler(struct k_work *work)
 
     switch (switch_state) {
     case MODEM_SWITCH_TO_TN:
-        err = modem_service_switch(MODEM_ACCESS_TN);
+        err = modem_service_switch(MODEM_LOGIC_ACCESS_TN);
         if (err) {
             LOG_WRN("Switch to TN failed: %d", err);
             (void)app_event_publish_type(EVT_MODEM_SWITCH_FAIL);
@@ -123,7 +111,7 @@ static void modem_switch_work_handler(struct k_work *work)
         break;
 
     case MODEM_SWITCH_TO_NTN:
-        err = modem_service_switch(MODEM_ACCESS_NTN);
+        err = modem_service_switch(MODEM_LOGIC_ACCESS_NTN);
         if (err) {
             LOG_WRN("Switch to NTN failed: %d", err);
             (void)app_event_publish_type(EVT_MODEM_SWITCH_FAIL);
@@ -221,9 +209,9 @@ int modem_service_udp_send_burst(const struct udp_test_cfg *cfg)
     int sock;
     struct sockaddr_in addr = {0};
     
-    char buf[256];
+    char buf[MODEM_LOGIC_UDP_MAX_PAYLOAD_LEN];
 
-    if (c->payload_len > sizeof(buf)) {
+    if (!modem_logic_udp_payload_len_valid(c->payload_len)) {
         return -EINVAL;
     }
 

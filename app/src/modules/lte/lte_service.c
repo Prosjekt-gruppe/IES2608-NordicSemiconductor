@@ -7,6 +7,7 @@
 
 
  #include "lte_service.h"
+ #include "lte_logic.h"
  #include "app_events.h"
 
  #include <modem/lte_lc.h>
@@ -19,17 +20,18 @@ LOG_MODULE_REGISTER(lte_service, LOG_LEVEL_INF);
 static bool lte_connected; 
 static bool probe_pending;
 
-static const char *lte_mode_name(enum lte_lc_lte_mode mode)
+static enum app_evt_type lte_app_event_from_logic(enum lte_logic_event event)
 {
-    switch (mode) {
-    case LTE_LC_LTE_MODE_NONE:
-        return "NONE";
-    case LTE_LC_LTE_MODE_LTEM:
-        return "LTE-M";
-    case LTE_LC_LTE_MODE_NBIOT:
-        return "NB-IoT";
+    switch (event) {
+    case LTE_LOGIC_EVENT_REG_OK:
+        return EVT_REG_OK;
+    case LTE_LOGIC_EVENT_REG_FAIL:
+        return EVT_REG_FAIL;
+    case LTE_LOGIC_EVENT_TN_READY_FOR_PROBE:
+        return EVT_TN_READY_FOR_PROBE;
+    case LTE_LOGIC_EVENT_NONE:
     default:
-        return "UNKNOWN";
+        return EVT_TIMEOUT;
     }
 }
 
@@ -39,50 +41,34 @@ static const char *lte_mode_name(enum lte_lc_lte_mode mode)
 static void lte_lc_evt_handler(const struct lte_lc_evt *const evt)
 {
     switch (evt->type) {
-    case LTE_LC_EVT_NW_REG_STATUS:
+    case LTE_LC_EVT_NW_REG_STATUS: {
+        struct lte_logic_reg_result result;
+
         LOG_INF("LTE NW registration status: %d", evt->nw_reg_status);
 
-
-        switch (evt->nw_reg_status) {
-        case LTE_LC_NW_REG_REGISTERED_HOME:
-        case LTE_LC_NW_REG_REGISTERED_ROAMING:
-            lte_connected=true;
-
-            if (probe_pending) {
-                probe_pending = false;
-                struct app_event ev = {
-                    .type = EVT_TN_READY_FOR_PROBE,
-                    .source_rat = RAT_LTEM,
-                };
-                (void)app_event_put(&ev, K_NO_WAIT);
-            } else {
-                struct app_event ev = {
-                    .type = EVT_REG_OK,
-                    .source_rat = RAT_LTEM,
-                };
-                (void)app_event_put(&ev, K_NO_WAIT);
-            }
-
-            LOG_INF("LTE registered on network");
+        result = lte_logic_handle_nw_reg_status(evt->nw_reg_status, probe_pending);
+        if (!result.handled) {
             break;
+        }
 
-        case LTE_LC_NW_REG_NOT_REGISTERED:
-        case LTE_LC_NW_REG_REGISTRATION_DENIED:
-        case LTE_LC_NW_REG_UNKNOWN:
-        case LTE_LC_NW_REG_UICC_FAIL:
-            lte_connected=false;
-            LOG_WRN("LTE registration failed/status=%d", evt->nw_reg_status);
+        lte_connected = result.connected;
+        probe_pending = result.probe_pending;
+
+        if (result.event != LTE_LOGIC_EVENT_NONE) {
             struct app_event ev = {
-                .type = EVT_REG_FAIL,
+                .type = lte_app_event_from_logic(result.event),
                 .source_rat = RAT_LTEM,
             };
             (void)app_event_put(&ev, K_NO_WAIT);
-            break;
+        }
 
-        default:
-            break;
+        if (result.connected) {
+            LOG_INF("LTE registered on network");
+        } else {
+            LOG_WRN("LTE registration failed/status=%d", evt->nw_reg_status);
         }
         break;
+    }
 
     case LTE_LC_EVT_CELLULAR_PROFILE_ACTIVE:
         LOG_INF("modem activate cellular profile (RAT starting)");
@@ -90,7 +76,7 @@ static void lte_lc_evt_handler(const struct lte_lc_evt *const evt)
 
     case LTE_LC_EVT_LTE_MODE_UPDATE:
         LOG_INF("LTE mode update: %s (%d)",
-                lte_mode_name(evt->lte_mode),
+                lte_logic_mode_name(evt->lte_mode),
                 evt->lte_mode);
         break;
     default:

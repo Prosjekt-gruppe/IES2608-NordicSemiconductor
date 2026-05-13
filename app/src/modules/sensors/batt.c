@@ -5,6 +5,7 @@
  */
 
 #include "batt.h"
+#include "batt_logic.h"
 #include "app_zbus.h"
 
 #include <errno.h>
@@ -26,11 +27,6 @@ LOG_MODULE_REGISTER(batt, LOG_LEVEL_INF);
 #define BATT_THREAD_PRIORITY     7
 #define BATT_POLL_INTERVAL_SEC   15
 
-#define BATT_STATUS_COMPLETE_MASK BIT(1)
-#define BATT_STATUS_TRICKLE_MASK  BIT(2)
-#define BATT_STATUS_CC_MASK       BIT(3)
-#define BATT_STATUS_CV_MASK       BIT(4)
-
 #if DT_HAS_COMPAT_STATUS_OKAY(nordic_npm1300_charger)
 #define BATT_NODE DT_COMPAT_GET_ANY_STATUS_OKAY(nordic_npm1300_charger)
 static const struct device *const batt_dev = DEVICE_DT_GET(BATT_NODE);
@@ -50,48 +46,6 @@ struct batt_sample {
 	int32_t charger_error;
 	bool vbus_present;
 };
-
-static const char *batt_level_string(int64_t voltage_mv)
-{
-	if (voltage_mv >= 4100) {
-		return "full";
-	}
-
-	if (voltage_mv >= 3850) {
-		return "high";
-	}
-
-	if (voltage_mv >= 3600) {
-		return "medium";
-	}
-
-	if (voltage_mv >= 3400) {
-		return "low";
-	}
-
-	return "critical";
-}
-
-static const char *batt_charge_state_string(int32_t status)
-{
-	if ((status & BATT_STATUS_COMPLETE_MASK) != 0) {
-		return "complete";
-	}
-
-	if ((status & BATT_STATUS_TRICKLE_MASK) != 0) {
-		return "trickle";
-	}
-
-	if ((status & BATT_STATUS_CC_MASK) != 0) {
-		return "charging";
-	}
-
-	if ((status & BATT_STATUS_CV_MASK) != 0) {
-		return "topping-off";
-	}
-
-	return "idle";
-}
 
 static int batt_read_sample(struct batt_sample *sample)
 {
@@ -163,8 +117,8 @@ static void batt_log_sample(const struct batt_sample *sample)
 {
 	LOG_INF("Battery: %lld mV (%s), %s, %s, current=%lld mA, temp=%lld.%03lld C, err=%d",
 		sample->voltage_mv,
-		batt_level_string(sample->voltage_mv),
-		batt_charge_state_string(sample->charger_status),
+		batt_logic_level_string(sample->voltage_mv),
+		batt_logic_charge_state_string(sample->charger_status),
 		sample->vbus_present ? "USB present" : "USB not present",
 		sample->current_ma,
 		sample->temp_mdegc / 1000,

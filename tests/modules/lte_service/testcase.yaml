@@ -1,0 +1,11 @@
+common:
+  tags:
+    - lte
+    - unit
+  type: unit
+tests:
+  app.lte_service.logic:
+    platform_allow:
+      - unit_testing
+    integration_platforms:
+      - unit_testing

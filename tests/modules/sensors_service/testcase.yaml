@@ -1,0 +1,11 @@
+common:
+  tags:
+    - sensors
+    - unit
+  type: unit
+tests:
+  app.sensors_service.logic:
+    platform_allow:
+      - unit_testing
+    integration_platforms:
+      - unit_testing

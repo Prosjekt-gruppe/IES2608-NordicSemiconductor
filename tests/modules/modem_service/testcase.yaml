@@ -1,0 +1,11 @@
+common:
+  tags:
+    - modem
+    - unit
+  type: unit
+tests:
+  app.modem_service.logic:
+    platform_allow:
+      - unit_testing
+    integration_platforms:
+      - unit_testing

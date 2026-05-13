@@ -13,13 +13,19 @@ target_sources(app PRIVATE src/main.c
     src/modules/common/app_events.c
     src/modules/common/app_zbus.c
     src/modules/core/app_sm.c
+    src/modules/gnss/gnss_logic.c
     src/modules/gnss/gnss_service.c
+    src/modules/lte/lte_logic.c
     src/modules/lte/lte_service.c
+    src/modules/modem/modem_logic.c
     src/modules/modem/modem_service.c
+    src/modules/ntn/ntn_logic.c
     src/modules/ntn/ntn_service.c
     src/modules/rsrp/rsrp_monitor.c
     src/modules/rsrp/rsrp_parse.c
     src/modules/rsrp/rsrp_service.c
+    src/modules/sensors/accel_logic.c
+    src/modules/sensors/batt_logic.c
     src/modules/location/location_service.c
     src/modules/cloud/cloud_service.c
 )

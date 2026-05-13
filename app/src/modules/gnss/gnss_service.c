@@ -5,6 +5,7 @@
  */
 
 #include "gnss_service.h"
+#include "gnss_logic.h"
 #include "app_zbus.h"
 #include "app_events.h"
 #include "cloud_service.h"
@@ -20,7 +21,6 @@
 
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
-#include <zephyr/sys/util.h>
 
 LOG_MODULE_REGISTER(gnss_service, LOG_LEVEL_INF);
 
@@ -53,7 +53,6 @@ static int publish_error(int err);
 static int publish_error_as_timeout(int err);
 static int handle_error(int err);
 
-static uint8_t count_tracked_satellites(const struct nrf_modem_gnss_pvt_data_frame *pvt);
 static void log_fix_data(const struct nrf_modem_gnss_pvt_data_frame *pvt);
 
 static void gnss_timeout_work_handler(struct k_work *work);
@@ -118,7 +117,7 @@ static int publish_fix(const struct nrf_modem_gnss_pvt_data_frame *pvt, int64_t 
                                        pvt->latitude,
                                        pvt->longitude,
                                        pvt->altitude,
-                                       count_tracked_satellites(pvt));
+                                       gnss_logic_count_tracked_satellites(pvt));
 
     return app_event_put(&ev, K_NO_WAIT);
 }
@@ -138,21 +137,6 @@ static int handle_error(int err)
     return err;
 }
 
-/* helpers */
-
-static uint8_t count_tracked_satellites(const struct nrf_modem_gnss_pvt_data_frame *pvt)
-{
-    uint8_t count = 0U;
-
-    for (size_t i = 0; i < ARRAY_SIZE(pvt->sv); ++i) {
-        if (pvt->sv[i].signal != 0U) {
-            count++;
-        }
-    }
-
-    return count;
-}
-
 static void log_fix_data(const struct nrf_modem_gnss_pvt_data_frame *pvt)
 {
     LOG_INF("Latitude: %.06f", pvt->latitude);
@@ -167,9 +151,12 @@ static void gnss_timeout_work_handler(struct k_work *work)
 {
     ARG_UNUSED(work);
 
-    if (gnss_running && assisted_start_in_progress &&
-        agnss_request_sent && nrf_cloud_agnss_request_in_progress() &&
-        !agnss_pending_timeout_extended) {
+    if (gnss_logic_timeout_action(gnss_running,
+                                  assisted_start_in_progress,
+                                  agnss_request_sent,
+                                  nrf_cloud_agnss_request_in_progress(),
+                                  agnss_pending_timeout_extended) ==
+        GNSS_LOGIC_TIMEOUT_EXTEND_AGNSS_PENDING) {
         agnss_pending_timeout_extended = true;
         LOG_WRN("GNSS timeout while A-GNSS request is still pending; extending by %d sec",
                 GNSS_AGNSS_PENDING_EXTENSION_SEC);
@@ -200,7 +187,7 @@ static void gnss_pvt_work_handler(struct k_work *work)
         return;
     }
 
-    uint8_t satellites = count_tracked_satellites(&pvt_data);
+    uint8_t satellites = gnss_logic_count_tracked_satellites(&pvt_data);
     LOG_INF("GNSS search active, satellites tracked: %u", satellites);
 
     if ((pvt_data.flags & NRF_MODEM_GNSS_PVT_FLAG_FIX_VALID) == 0U) {
@@ -410,22 +397,6 @@ static void agnss_request_work_handler(struct k_work *work)
     }
 }
 
-static bool agnss_processed_has_data(const struct nrf_modem_gnss_agnss_data_frame *processed)
-{
-    if (processed->data_flags != 0) {
-        return true;
-    }
-
-    for (uint8_t i = 0; i < processed->system_count; i++) {
-        if (processed->system[i].sv_mask_ephe != 0 ||
-            processed->system[i].sv_mask_alm != 0) {
-            return true;
-        }
-    }
-
-    return false;
-}
-
 static void gnss_mark_agnss_ready(const char *source)
 {
     struct nrf_modem_gnss_agnss_data_frame processed = {0};
@@ -441,7 +412,7 @@ static void gnss_mark_agnss_ready(const char *source)
     }
 
     nrf_cloud_agnss_processed(&processed);
-    if (agnss_processed_has_data(&processed)) {
+    if (gnss_logic_agnss_processed_has_data(&processed)) {
         LOG_INF("A-GNSS data processed via %s: flags=0x%x gps_ephe=0x%016llx gps_alm=0x%016llx",
                 source,
                 (unsigned int)processed.data_flags,
