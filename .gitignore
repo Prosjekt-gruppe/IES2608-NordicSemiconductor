@@ -56,3 +56,4 @@ __pycache__/
 ntn_log.txt
 **/twister-out/
 **/data/raw/*
+**/ppk/output/*
