@@ -138,6 +138,11 @@ def parse_args():
         help="UART baudrate for DUT logs.",
     )
     parser.add_argument(
+        "--no-uart",
+        action="store_true",
+        help="Disable DUT UART logging.",
+    )
+    parser.add_argument(
         "--mode",
         choices=("ampere", "source"),
         default=MEASUREMENT_MODE,
@@ -342,11 +347,22 @@ def main() -> None:
         time.sleep(0.5)
 
     ppk_thread = threading.Thread(target=ppk_worker, args=(ppk2,))
-    uart_thread = threading.Thread(target=uart_worker, args=(args.uart_port, args.uart_baudrate))
+    uart_thread = None
+    if not args.no_uart:
+        uart_thread = threading.Thread(
+            target=uart_worker,
+            args=(args.uart_port, args.uart_baudrate),
+        )
 
     try:
-        # start uart logger
-        uart_thread.start()
+        if args.no_uart:
+            print("UART logging disabled (--no-uart)")
+            t_ns, sample_idx = rec_state.snapshot()
+            event_file.write(f"{t_ns},{sample_idx},system,UART_LOGGING_DISABLED\n")
+            event_file.flush()
+        else:
+            # start uart logger
+            uart_thread.start()
         
         # start ppk logger
         ppk_thread.start()
@@ -366,9 +382,10 @@ def main() -> None:
         event_file.flush()
 
         while True:
-            while not uart_queue.empty():
-                ts, msg = uart_queue.get()
-                print(f"[UART] {ts:.3f} {msg}")
+            if not args.no_uart:
+                while not uart_queue.empty():
+                    ts, msg = uart_queue.get()
+                    print(f"[UART] {ts:.3f} {msg}")
 
             time.sleep(0.05)
 
@@ -379,7 +396,7 @@ def main() -> None:
         stop_event.set()
         if ppk_thread.is_alive():
             ppk_thread.join()
-        if uart_thread.is_alive():
+        if uart_thread is not None and uart_thread.is_alive():
             uart_thread.join()
         if raw_file is not None:
             raw_file.close()

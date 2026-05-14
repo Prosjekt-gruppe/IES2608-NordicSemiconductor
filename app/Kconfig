@@ -166,6 +166,13 @@ config APP_FIELD_LOG_SHELL
       Enable the fieldlog shell command group with info, dump and erase
       commands over the serial shell.
 
+config APP_FIELD_LOG_CONN_EVAL
+    bool "Log LTE conn eval samples in field log"
+    default y
+    depends on APP_FIELD_LOG
+    help
+      Store LTE connection evaluation metrics as separate field log records.
+
 config APP_CORE_SEND_UDP_DATA
     bool "Send UDP data over NTN"
     help

@@ -1,0 +1,126 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+PROJECT_DIR="/home/wlt/dev/ies2608/project"
+NCS_VERSION="v3.2.4"
+BUILD_DIR="app/build"
+TEST_PATH="tests/modules"
+TWISTER_OUT="tests/twister-out"
+
+# Default board
+BOARD="nrf9151dk/nrf9151/ns"
+
+cd "$PROJECT_DIR"
+
+run() {
+  nrfutil sdk-manager toolchain launch --ncs-version "$NCS_VERSION" -- "$@"
+}
+
+ACTION=""
+EXTRA_CMAKE_ARGS=()
+
+usage() {
+  cat <<'EOF'
+Usage:
+  ies2608 [--dk | --thingy | --thingy91x | --run-tests ] [--build | --pristine | --flash | --shell | --clean] [--mtrace]
+
+Examples:
+  ies2608 --dk --build
+  ies2608 --dk --pristine --mtrace
+  ies2608 --thingy --build
+  ies2608 --thingy91x --pristine --mtrace
+EOF
+}
+
+run_tests() {
+  nrfutil sdk-manager toolchain launch --ncs-version "$NCS_VERSION" -- \
+    bash -lc 'export LD_LIBRARY_PATH="/usr/lib:${LD_LIBRARY_PATH:-}"; exec "$@"' \
+    bash "$@"
+}
+
+for arg in "$@"; do
+  case "$arg" in
+    --dk)
+      BOARD="nrf9151dk/nrf9151/ns"
+      ;;
+    --thingy|--thingy91x)
+      BOARD="thingy91x/nrf9151/ns"
+      ;;
+    --mtrace)
+      EXTRA_CMAKE_ARGS+=("-Dapp_SNIPPET=nrf91-modem-trace-uart")
+      ;;
+    --build|--pristine|--flash|--shell|--clean|--run-tests|--run-coverage)
+      if [[ -n "$ACTION" ]]; then
+        echo "Error: only one action can be specified"
+        usage
+        exit 1
+      fi
+      ACTION="$arg"
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      if [[ "$ACTION" == "--run-tests" ]]; then
+          TEST_PATH="$arg"
+      else
+          echo "Error: unknown argument: $arg"
+          usage
+          exit 1
+      fi
+      ;;
+  esac
+done
+
+if [[ -z "$ACTION" ]]; then
+  echo "Error: no action specified"
+  usage
+  exit 1
+fi
+
+case "$ACTION" in
+  --run-tests)
+    rm -rf "$TWISTER_OUT"
+    run_tests west twister -T "$TEST_PATH" -p unit_testing --outdir "$TWISTER_OUT"
+    ;;
+  --run-coverage)
+    rm -rf "$TWISTER_OUT"
+    run_tests west twister --coverage -T "$TEST_PATH" -p unit_testing \
+    --outdir "$TWISTER_OUT" \
+    --coverage-basedir .
+  ;;
+  --build)
+    if [[ ${#EXTRA_CMAKE_ARGS[@]} -gt 0 ]]; then
+      run west build -b "$BOARD" app -d "$BUILD_DIR" -- "${EXTRA_CMAKE_ARGS[@]}"
+    else
+      run west build -b "$BOARD" app -d "$BUILD_DIR"
+    fi
+    ;;
+
+  --pristine)
+    if [[ ${#EXTRA_CMAKE_ARGS[@]} -gt 0 ]]; then
+      run west build -b "$BOARD" app -d "$BUILD_DIR" --pristine -- "${EXTRA_CMAKE_ARGS[@]}"
+    else
+      run west build -b "$BOARD" app -d "$BUILD_DIR" --pristine
+    fi
+    ;;
+
+  --flash)
+    run west flash -d "$BUILD_DIR"
+    ;;
+
+  --shell)
+    exec nrfutil sdk-manager toolchain launch --ncs-version "$NCS_VERSION" --shell
+    ;;
+
+  --clean)
+    rm -rf "$BUILD_DIR"
+    echo "Cleaned build directory"
+    ;;
+
+  *)
+    usage
+    exit 1
+    ;;
+esac

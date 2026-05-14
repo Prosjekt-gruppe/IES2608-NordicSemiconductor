@@ -7,6 +7,10 @@
 #include "rsrp_service.h"
 #include "app_events.h"
 
+#if defined(CONFIG_APP_FIELD_LOG)
+#include "field_log.h"
+#endif
+
 #include <errno.h>
 #include <iso646.h>
 #include <stdint.h>
@@ -245,6 +249,10 @@ static int rsrp_service_conn_eval_get(struct lte_lc_conn_eval_params *params)
 	LOG_INF("conn eval: earfcn=%d band=%d phy_cid=%d cell_id=%u mcc=%d mnc=%d",
 		params->earfcn, params->band, params->phy_cid, params->cell_id,
 		params->mcc, params->mnc);
+
+#if defined(CONFIG_APP_FIELD_LOG) && defined(CONFIG_APP_FIELD_LOG_CONN_EVAL)
+	field_log_note_conn_eval(params);
+#endif
 
 	return 0;
 }
