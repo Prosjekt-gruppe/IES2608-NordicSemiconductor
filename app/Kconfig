@@ -77,6 +77,13 @@ config APP_MODEM_RSRP_WEAK_SAMPLE_COUNT
       threshold needed before the modem service requests NTN fallback, even if
       the signal is not actively dropping anymore.
 
+config APP_LTE_BANDLOCK_AT_CMD
+    string "LTE bandlock AT command"
+    default ""
+    help
+      Optional AT command sent before LTE connect, e.g. AT%XBANDLOCK=...
+      Leave empty to disable bandlock.
+
 config APP_SENSOR_ACCEL_DEMO
     bool "Enable accelerometer demo"
     default y if BOARD_THINGY91X_NRF9151_NS
