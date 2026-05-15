@@ -438,6 +438,12 @@ int rsrp_service_start_monitor(void)
 		return -EINVAL;
 	}
 
+	if (current_mode == RSRP_MODE_MONITOR) {
+		LOG_INF("LTE-M RSRP monitor already running");
+		monitor_poll_interval_sec = rsrp_target_poll_interval_sec();
+		return k_work_reschedule(&rsrp_work, K_SECONDS(monitor_poll_interval_sec));
+	}
+
 	current_mode = RSRP_MODE_MONITOR;
 	reset_signal_tracking();
 	monitor_poll_interval_sec = rsrp_target_poll_interval_sec();
@@ -465,6 +471,13 @@ int rsrp_service_start_probe(uint8_t samples)
 
 int rsrp_service_stop(void)
 {
+	if (current_mode == RSRP_MODE_IDLE) {
+		LOG_INF("LTE-M RSRP monitor already stopped");
+		// redundant?
+		//reset_signal_tracking();
+		return 0;
+	}
+
 	current_mode = RSRP_MODE_IDLE;
 	reset_signal_tracking();
 	return k_work_cancel_delayable(&rsrp_work);
@@ -491,13 +504,12 @@ void rsrp_service_set_motion_hint(bool moving, uint32_t speed_mm_s,
 
 	monitor_poll_interval_sec = next_interval_sec;
 
-	LOG_INF("RSRP poll interval %u s (%s, speed=%u mm/s, accel=%u mg)",
-		monitor_poll_interval_sec,
-		moving ? "moving" : "still",
-		motion_speed_mm_s,
-		motion_linear_accel_mg);
-
 	if (service_initialized and (current_mode == RSRP_MODE_MONITOR)) {
+		LOG_INF("RSRP poll interval %u s (%s, speed=%u mm/s, accel=%u mg)",
+			monitor_poll_interval_sec,
+			moving ? "moving" : "still",
+			motion_speed_mm_s,
+			motion_linear_accel_mg);
 		(void)k_work_reschedule(&rsrp_work, K_SECONDS(monitor_poll_interval_sec));
 	}
 }
