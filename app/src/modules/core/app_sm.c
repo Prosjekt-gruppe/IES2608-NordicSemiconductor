@@ -32,6 +32,13 @@ LOG_MODULE_REGISTER(app_sm, LOG_LEVEL_INF);
 
 #define APP_GNSS_FIX_MAX_AGE_SEC 120
 
+/* TEMP: hardcoded NTN test location (disable by setting to 0) */
+#define APP_NTN_TEST_LOCATION_ENABLED 1
+#define APP_NTN_TEST_LAT 63.453591
+#define APP_NTN_TEST_LON 10.450984
+#define APP_NTN_TEST_ALT 0.0
+#define APP_NTN_TEST_UNCERTAINTY_M 200
+
 ZBUS_MSG_SUBSCRIBER_DEFINE(app_fsm_sub); //Subscriber for app events
 
 union app_sm_msg {
@@ -96,6 +103,25 @@ static void ntn_connect_timer_handler(struct k_timer *timer);
 static void ltem_timer_handler(struct k_timer *timer);
 static void handoff_timer_handler(struct k_timer *timer); 
 static const char *rat_name(enum rat rat);
+
+#if APP_NTN_TEST_LOCATION_ENABLED
+static void apply_ntn_test_location(struct app_ctx *ctx)
+{
+    if (ctx == NULL) {
+        return;
+    }
+
+    ctx->have_fix = true;
+    ctx->last_fix_uptime_ms = k_uptime_get();
+    ctx->last_pvt.latitude = APP_NTN_TEST_LAT;
+    ctx->last_pvt.longitude = APP_NTN_TEST_LON;
+    ctx->last_pvt.altitude = APP_NTN_TEST_ALT;
+
+    LOG_INF("Using hardcoded NTN test location: lat=%.6f lon=%.6f alt=%.1f uncertainty=%u",
+            APP_NTN_TEST_LAT, APP_NTN_TEST_LON, APP_NTN_TEST_ALT,
+            APP_NTN_TEST_UNCERTAINTY_M);
+}
+#endif
 
 
 
@@ -614,6 +640,14 @@ static void ltem_connected_entry(void *obj)
     }
 
     LOG_INF("ltem_connected_entry ok");
+
+#if APP_NTN_TEST_LOCATION_ENABLED
+    LOG_WRN("TEMP: forcing NTN test path");
+    apply_ntn_test_location(ctx);
+    ctx->next_rat = RAT_NTN;
+    transition_to_state(ctx, STATE_BACKOFF);
+    return;
+#endif
 
     // orchestration logic 
     if (!ctx->cloud_connected){
@@ -1376,6 +1410,10 @@ static enum smf_state_result backoff_run(void *obj)
         }
 
         LOG_INF("Trying to connect NTN");
+
+    #if APP_NTN_TEST_LOCATION_ENABLED
+        apply_ntn_test_location(ctx);
+    #endif
 
         if (!ctx->have_fix) {
             LOG_INF("No GNSS fix");
