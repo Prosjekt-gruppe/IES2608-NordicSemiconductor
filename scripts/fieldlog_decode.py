@@ -128,12 +128,14 @@ def parse_v2_row(row_text: str) -> dict:
     parts = next(csv.reader([row_text]))
     if len(parts) == 21 and parts and parts[0].strip() == "state":
         parts.append("")
+    row_type = parts[0].strip()
+    if len(parts) == 30 and row_type == "conneval":
+        parts.insert(21, "")
     if len(parts) not in (22, 31):
         raise ValueError(f"expected 22 or 31 columns, got {len(parts)}: {row_text!r}")
     if len(parts) == 22:
         parts.extend([""] * 9)
 
-    row_type = parts[0].strip()
     seq = int(parts[1])
     uptime_s = int(parts[2])
 
