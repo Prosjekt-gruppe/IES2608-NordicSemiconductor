@@ -627,12 +627,14 @@ static void ltem_connected_entry(void *obj)
 
     if(ctx->cloud_connected && ctx->last_done == STEP_CLOUD_DONE){
         struct app_event ev = {
-            .type = EVT_START_LTE_LOC
+            .type = EVT_START_GNSS
         };
 
-        LOG_INF("LTEM_CONNECTED: requesting LTE location");
+        LOG_INF("LTEM_CONNECTED: requesting GNSS acquire");
         int pub_err = app_event_put(&ev, K_MSEC(10));
-        //LOG_INF("app_event_put(EVT_START_LTE_LOC) -> %d", pub_err);
+        if (pub_err) {
+            LOG_WRN("app_event_put(EVT_START_GNSS) failed: %d", pub_err);
+        }
         return;
     }
 
@@ -870,6 +872,7 @@ static void gnss_acquire_entry(void *obj)
     struct app_ctx *ctx = obj;
     int err;
     int32_t timeout_sec = ctx->gnss_timeout_sec;
+    bool for_ntn;
 
     
     LOG_WRN("ENTER: STATE_GNSS_ACQUIRE");
@@ -881,17 +884,21 @@ static void gnss_acquire_entry(void *obj)
     LOG_INF("GNSS goal=%d timeout=%d sec",
             ctx->gnss_goal, timeout_sec);
 
-    err = gnss_service_start_assisted(timeout_sec);
-    LOG_INF("gnss_service_start_assisted() -> %d", err);
+    for_ntn = (ctx->gnss_goal == GNSS_GOAL_REQUIRED_FOR_NTN);
+    if (for_ntn) {
+        LOG_INF("GNSS acquire: standalone (NTN pre-acquire)");
+        err = gnss_service_start();
+        if (!err) {
+            (void)gnss_service_start_timeout(timeout_sec);
+        }
+    } else {
+        LOG_INF("GNSS acquire: assisted (A-GNSS if available)");
+        err = gnss_service_start_assisted(timeout_sec);
+    }
+    LOG_INF("gnss start -> %d", err);
 
     if (err) {
-        LOG_ERR("gnss_service_start_assisted failed: %d", err);
-
-        struct app_event ev = {
-            .type = EVT_TIMEOUT
-        };
-
-        (void)app_event_put(&ev, K_NO_WAIT);
+        LOG_ERR("gnss start failed: %d", err);
         return;
     }
 
