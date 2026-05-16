@@ -252,8 +252,12 @@ static void gnss_event_handler(int event)
         agnss_req_received = true;
         LOG_INF("agnss_req_received set true");
 
-        LOG_INF("Submitting A-GNSS request work");
-        k_work_submit(&agnss_request_work);
+        if (assisted_start_in_progress) {
+            LOG_INF("Submitting A-GNSS request work");
+            k_work_submit(&agnss_request_work);
+        } else {
+            LOG_INF("GNSS A-GNSS request ignored: standalone mode");
+        }
         break;
 
     default:
@@ -387,6 +391,12 @@ int gnss_service_start_assisted(int32_t timeout_sec)
     LOG_INF("Starting GNSS (preparing for AGNSS)");
 
     /* Start GNSS first to trigger AGNSS request */
+    assisted_start_in_progress = false;
+    agnss_ready = false;
+    agnss_req_received = false;
+    agnss_request_sent = false;
+    agnss_pending_timeout_extended = false;
+
     err = gnss_start_search();
     if (err) {
         return handle_error(err);

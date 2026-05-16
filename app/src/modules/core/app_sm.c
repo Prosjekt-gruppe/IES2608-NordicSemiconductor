@@ -33,7 +33,7 @@ LOG_MODULE_REGISTER(app_sm, LOG_LEVEL_INF);
 #define APP_GNSS_FIX_MAX_AGE_SEC 120
 
 /* TEMP: hardcoded NTN test location (disable by setting to 0) */
-#define APP_NTN_TEST_LOCATION_ENABLED 1
+#define APP_NTN_TEST_LOCATION_ENABLED 0
 #define APP_NTN_TEST_LAT 63.453591
 #define APP_NTN_TEST_LON 10.450984
 #define APP_NTN_TEST_ALT 0.0
@@ -616,7 +616,7 @@ static void ltem_connected_entry(void *obj)
 #endif
  
 #if defined(CONFIG_APP_CORE_SM_PROBE_TEST)
-    LOG_INF("forcing NTN fallback test in 10 sec");
+    LOG_WRN("Forcing NTN test path");
     k_timer_start(&ctx->lte_timer,
                   K_SECONDS(10),
                   K_NO_WAIT);
@@ -661,6 +661,7 @@ static void ltem_connected_entry(void *obj)
         return;
     }
 
+#if !defined(CONFIG_APP_CORE_SM_PROBE_TEST)
     if(ctx->cloud_connected && ctx->last_done == STEP_CLOUD_DONE){
         struct app_event ev = {
             .type = EVT_START_GNSS
@@ -673,6 +674,7 @@ static void ltem_connected_entry(void *obj)
         }
         return;
     }
+#endif
 
     if(ctx->cloud_connected && ctx->last_done == STEP_LTE_LOC_DONE) {
         struct app_event ev = {
@@ -738,7 +740,7 @@ static enum smf_state_result ltem_connected_run(void *obj)
 #if defined(CONFIG_APP_CORE_SM_PROBE_TEST)
     case EVT_TIMEOUT:
         ctx->next_rat = RAT_NTN;
-        LOG_INF("manual force test going to STATE_BACKOFF");
+        LOG_INF("Forcing NTN test path");
         transition_to_state(ctx, STATE_BACKOFF);
         return SMF_EVENT_HANDLED;
 #endif
@@ -938,7 +940,11 @@ static void gnss_acquire_entry(void *obj)
         return;
     }
 
-    LOG_INF("GNSS acquire started (A-GNSS handled internally)");
+    if (for_ntn) {
+        LOG_INF("GNSS acquire started (standalone)");
+    } else {
+        LOG_INF("GNSS acquire started (assisted)");
+    }
 }
 
 static enum smf_state_result gnss_acquire_run(void *obj)
@@ -964,6 +970,7 @@ static enum smf_state_result gnss_acquire_run(void *obj)
                 (double)ctx->last_pvt.longitude);
 
         if (required_for_ntn) {
+            LOG_INF("GNSS fix acquired -> NTN connect");
             LOG_WRN("TRANSITION: STATE_GNSS_ACQUIRE -> STATE_NTN_CONNECTING");
             transition_to_state(ctx, STATE_NTN_CONNECTING);
         } else {
@@ -1416,7 +1423,7 @@ static enum smf_state_result backoff_run(void *obj)
     #endif
 
         if (!ctx->have_fix) {
-            LOG_INF("No GNSS fix");
+            LOG_WRN("No valid GNSS fix -> acquiring standalone GNSS for NTN");
             ctx->gnss_goal = GNSS_GOAL_REQUIRED_FOR_NTN;
             ctx->gnss_timeout_sec = CONFIG_APP_GNSS_TIMEOUT_SEC;
             ctx->gnss_extend_once = true;
@@ -1432,6 +1439,7 @@ static enum smf_state_result backoff_run(void *obj)
 
         if (age_ms < 0 || age_sec >= APP_GNSS_FIX_MAX_AGE_SEC) {
             LOG_WRN("GNSS fix stale, age=%lld sec", (long long)age_sec);
+            LOG_WRN("No valid GNSS fix -> acquiring standalone GNSS for NTN");
             ctx->have_fix = false;
             ctx->gnss_goal = GNSS_GOAL_REQUIRED_FOR_NTN;
             ctx->gnss_timeout_sec = CONFIG_APP_GNSS_TIMEOUT_SEC;
