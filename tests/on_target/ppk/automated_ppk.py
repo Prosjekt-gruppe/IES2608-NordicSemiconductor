@@ -358,7 +358,7 @@ def ppk_worker(ppk2: PPK2_API) -> None:
                 window_samples.clear()
                 window_start = now
 
-            time.sleep(0.01)  # litt raskere enn før for bedre sampling
+            time.sleep(0.001)  # litt raskere enn før for bedre sampling
 
     finally:
         ppk2.stop_measuring()

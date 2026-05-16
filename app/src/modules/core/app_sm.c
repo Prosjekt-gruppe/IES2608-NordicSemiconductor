@@ -30,6 +30,8 @@
 
 LOG_MODULE_REGISTER(app_sm, LOG_LEVEL_INF);
 
+#define APP_GNSS_FIX_MAX_AGE_SEC 120
+
 ZBUS_MSG_SUBSCRIBER_DEFINE(app_fsm_sub); //Subscriber for app events
 
 union app_sm_msg {
@@ -916,6 +918,7 @@ static enum smf_state_result gnss_acquire_run(void *obj)
 
         ctx->last_pvt = ctx->ev.pvt;
         ctx->have_fix = true;
+        ctx->last_fix_uptime_ms = k_uptime_get();
         ctx->last_done = STEP_GNSS_DONE;
 
         ctx->gnss_goal = GNSS_GOAL_NONE;
@@ -1375,7 +1378,7 @@ static enum smf_state_result backoff_run(void *obj)
         LOG_INF("Trying to connect NTN");
 
         if (!ctx->have_fix) {
-            LOG_INF("No GNSS fix -> trying to acquire fix");
+            LOG_INF("No GNSS fix");
             ctx->gnss_goal = GNSS_GOAL_REQUIRED_FOR_NTN;
             ctx->gnss_timeout_sec = CONFIG_APP_GNSS_TIMEOUT_SEC;
             ctx->gnss_extend_once = true;
@@ -1384,6 +1387,24 @@ static enum smf_state_result backoff_run(void *obj)
             transition_to_state(ctx, STATE_GNSS_ACQUIRE);
             return SMF_EVENT_HANDLED;
         }
+
+        int64_t now_ms = k_uptime_get();
+        int64_t age_ms = now_ms - ctx->last_fix_uptime_ms;
+        int64_t age_sec = age_ms / 1000;
+
+        if (age_ms < 0 || age_sec >= APP_GNSS_FIX_MAX_AGE_SEC) {
+            LOG_WRN("GNSS fix stale, age=%lld sec", (long long)age_sec);
+            ctx->have_fix = false;
+            ctx->gnss_goal = GNSS_GOAL_REQUIRED_FOR_NTN;
+            ctx->gnss_timeout_sec = CONFIG_APP_GNSS_TIMEOUT_SEC;
+            ctx->gnss_extend_once = true;
+
+            LOG_WRN("TRANSITION: STATE_BACKOFF -> STATE_GNSS_ACQUIRE");
+            transition_to_state(ctx, STATE_GNSS_ACQUIRE);
+            return SMF_EVENT_HANDLED;
+        }
+
+        LOG_INF("GNSS fix fresh, age=%lld sec", (long long)age_sec);
 
         transition_to_state(ctx, STATE_NTN_CONNECTING);
         return SMF_EVENT_HANDLED;
@@ -1456,6 +1477,8 @@ int app_sm_start(struct app_ctx *ctx)
 {
     ctx->state = STATE_BOOT;
     ctx->rsrp_dbm = INT32_MIN;
+    ctx->have_fix = false;
+    ctx->last_fix_uptime_ms = 0;
     k_thread_create(&smf_thread_data, smf_stack, SMF_STACK_SIZE,
                     smf_thread, ctx, NULL, NULL,
                     SMF_PRIORITY, 0, K_NO_WAIT);
