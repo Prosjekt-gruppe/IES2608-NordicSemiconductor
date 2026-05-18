@@ -18,6 +18,12 @@ config APP_GNSS_TIMEOUT_SEC
       need more than 30 seconds outdoors, especially after a cold start or when
       the antenna view is marginal.
 
+config APP_FORCE_ASSISTED_GNSS_FOR_NTN
+    bool "Force assisted GNSS for NTN pre-acquire"
+    default n
+    help
+      Use assisted GNSS for NTN pre-acquire during field testing.
+
 config APP_MODEM_SIGNAL_POLL_INTERVAL_SEC
     int "LTE-M signal poll interval in seconds"
     default 5

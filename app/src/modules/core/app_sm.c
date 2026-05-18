@@ -30,12 +30,13 @@
 
 LOG_MODULE_REGISTER(app_sm, LOG_LEVEL_INF);
 
-#define APP_GNSS_FIX_MAX_AGE_SEC 120
+#define APP_GNSS_FIX_MAX_AGE_SEC 300
+#define APP_NTN_LTE_PROBE_DELAY_SEC 30
 
 /* TEMP: hardcoded NTN test location (disable by setting to 0) */
 #define APP_NTN_TEST_LOCATION_ENABLED 0
-#define APP_NTN_TEST_LAT 63.453591
-#define APP_NTN_TEST_LON 10.450984
+#define APP_NTN_TEST_LAT 63.483591
+#define APP_NTN_TEST_LON 10.550984
 #define APP_NTN_TEST_ALT 0.0
 #define APP_NTN_TEST_UNCERTAINTY_M 200
 
@@ -462,6 +463,26 @@ static enum smf_state_result connected_run(void *obj)
 
     case EVT_PDN_DOWN:
     case EVT_REG_FAIL:
+        LOG_WRN("CONNECTED: net event=%s source=%s active=%s next=%s state=%d",
+                app_evt_name(ctx->ev.type),
+                rat_name(ctx->ev.source_rat),
+                rat_name(ctx->active_rat),
+                rat_name(ctx->next_rat),
+                ctx->state);
+
+        if (ctx->next_rat == RAT_NTN && ctx->ev.source_rat == RAT_LTEM) {
+            LOG_WRN("CONNECTED: ignoring LTE teardown event during NTN handoff");
+            return SMF_EVENT_HANDLED;
+        }
+
+        if (ctx->ev.source_rat != RAT_UNKNOWN &&
+            ctx->ev.source_rat != ctx->active_rat) {
+            LOG_WRN("CONNECTED: ignoring stale net event from %s (active=%s)",
+                    rat_name(ctx->ev.source_rat),
+                    rat_name(ctx->active_rat));
+            return SMF_EVENT_HANDLED;
+        }
+
         LOG_WRN("CONNECTED: network lost -> BACKOFF");
 
         ctx->pdn_up = false;
@@ -559,6 +580,8 @@ static void ltem_timer_handler(struct k_timer *timer)
 {
     ARG_UNUSED(timer);
 
+    LOG_WRN("lte force-test timeout fired");
+
     struct app_event ev = {
         .type = EVT_TIMEOUT
     };
@@ -591,13 +614,6 @@ static void ltem_connected_entry(void *obj)
         if (err < 0) {
             LOG_WRN("Failed to start LTE signal monitor: %d", err);
         }
-
-    struct lte_lc_conn_eval_params conn_eval = {0};
-
-    err = modem_service_conn_eval_get(&conn_eval);
-    if (err) {
-        LOG_WRN("DEBUG CONEVAL test failed: %d", err);
-    }
 
 #if defined(CONFIG_APP_DEBUG_CORE_UDP_BURST_TEST)
     struct udp_test_cfg test_cfg = {
@@ -697,6 +713,37 @@ static enum smf_state_result ltem_connected_run(void *obj)
         LOG_WRN("LTE poor, consider switching RAT");
         ctx->next_rat = RAT_NTN;
 
+        if (!ctx->have_fix) {
+            LOG_WRN("GNSS fix missing");
+            LOG_WRN("LTE poor but GNSS fix missing/stale -> acquiring GNSS before LTE teardown");
+            ctx->gnss_goal = GNSS_GOAL_REQUIRED_FOR_NTN;
+            ctx->gnss_timeout_sec = CONFIG_APP_GNSS_TIMEOUT_SEC;
+            ctx->gnss_extend_once = true;
+
+            LOG_WRN("TRANSITION: STATE_LTEM_CONNECTED -> STATE_GNSS_ACQUIRE");
+            transition_to_state(ctx, STATE_GNSS_ACQUIRE);
+            return SMF_EVENT_HANDLED;
+        }
+
+        int64_t now_ms = k_uptime_get();
+        int64_t age_ms = now_ms - ctx->last_fix_uptime_ms;
+        int64_t age_sec = age_ms / 1000;
+
+        if (age_ms < 0 || age_sec >= APP_GNSS_FIX_MAX_AGE_SEC) {
+            LOG_WRN("GNSS fix stale, age=%lld sec", (long long)age_sec);
+            LOG_WRN("LTE poor but GNSS fix missing/stale -> acquiring GNSS before LTE teardown");
+            ctx->have_fix = false;
+            ctx->gnss_goal = GNSS_GOAL_REQUIRED_FOR_NTN;
+            ctx->gnss_timeout_sec = CONFIG_APP_GNSS_TIMEOUT_SEC;
+            ctx->gnss_extend_once = true;
+
+            LOG_WRN("TRANSITION: STATE_LTEM_CONNECTED -> STATE_GNSS_ACQUIRE");
+            transition_to_state(ctx, STATE_GNSS_ACQUIRE);
+            return SMF_EVENT_HANDLED;
+        }
+
+        LOG_INF("GNSS fix fresh, age=%lld sec", (long long)age_sec);
+
         if (lte_service_is_connected()) {
             
             /* try disconnecting all services before NTN */
@@ -739,6 +786,9 @@ static enum smf_state_result ltem_connected_run(void *obj)
 /* force EVT_LTE_POOR (usually should be disabled) */
 #if defined(CONFIG_APP_CORE_SM_PROBE_TEST)
     case EVT_TIMEOUT:
+    LOG_WRN("EVT_TIMEOUT in STATE_LTEM_CONNECTED active=%s next=%s",
+        rat_name(ctx->active_rat),
+        rat_name(ctx->next_rat));
         ctx->next_rat = RAT_NTN;
         LOG_INF("Forcing NTN test path");
         transition_to_state(ctx, STATE_BACKOFF);
@@ -924,11 +974,16 @@ static void gnss_acquire_entry(void *obj)
 
     for_ntn = (ctx->gnss_goal == GNSS_GOAL_REQUIRED_FOR_NTN);
     if (for_ntn) {
+#if defined(CONFIG_APP_FORCE_ASSISTED_GNSS_FOR_NTN)
+        LOG_INF("GNSS acquire: assisted forced for NTN pre-acquire");
+        err = gnss_service_start_assisted(timeout_sec);
+#else
         LOG_INF("GNSS acquire: standalone (NTN pre-acquire)");
         err = gnss_service_start();
         if (!err) {
             (void)gnss_service_start_timeout(timeout_sec);
         }
+#endif
     } else {
         LOG_INF("GNSS acquire: assisted (A-GNSS if available)");
         err = gnss_service_start_assisted(timeout_sec);
@@ -941,7 +996,11 @@ static void gnss_acquire_entry(void *obj)
     }
 
     if (for_ntn) {
+#if defined(CONFIG_APP_FORCE_ASSISTED_GNSS_FOR_NTN)
+        LOG_INF("GNSS acquire started (assisted forced for NTN)");
+#else
         LOG_INF("GNSS acquire started (standalone)");
+#endif
     } else {
         LOG_INF("GNSS acquire started (assisted)");
     }
@@ -982,6 +1041,10 @@ static enum smf_state_result gnss_acquire_run(void *obj)
     }
 
     case EVT_TIMEOUT: {
+        LOG_WRN("EVT_TIMEOUT in STATE_GNSS_ACQUIRE active=%s next=%s goal=%d",
+            rat_name(ctx->active_rat),
+            rat_name(ctx->next_rat),
+            ctx->gnss_goal);
         LOG_INF("GNSS_ACQUIRE: gnss timeout");
 
         if (ctx->gnss_goal == GNSS_GOAL_REQUIRED_FOR_NTN &&
@@ -1118,6 +1181,9 @@ static enum smf_state_result ntn_connecting_run(void *obj)
         __fallthrough;
 
     case EVT_TIMEOUT:
+        LOG_WRN("EVT_TIMEOUT in STATE_NTN_CONNECTING active=%s next=%s",
+            rat_name(ctx->active_rat),
+            rat_name(ctx->next_rat));
         LOG_INF("ntn connect failed/timeout");
         ctx->pdn_up=false;
 
@@ -1151,6 +1217,8 @@ static void ntn_timer_handler(struct k_timer *timer)
 {
     ARG_UNUSED(timer);
 
+    LOG_WRN("ntn connected probe timeout fired");
+
     struct app_event ev = {
         .type = EVT_TIMEOUT
     };
@@ -1162,7 +1230,7 @@ static void ntn_connect_timer_handler(struct k_timer *timer)
 {
     ARG_UNUSED(timer);
 
-    LOG_WRN("NTN connect timeout expired");
+    LOG_WRN("ntn connect timeout fired");
 
     struct app_event ev = {
         .type = EVT_TIMEOUT
@@ -1177,10 +1245,9 @@ static void ntn_connected_entry(void *obj)
 
 /* force lte probe check after 5s for test change to 50 or something later */
 //#if defined(CONFIG_APP_CORE_SM_PROBE_TEST)
-    LOG_INF("Starting ntn probe timer");
-    int32_t delay_ms = 5000;
+    LOG_INF("Starting ntn probe timer: %d sec", APP_NTN_LTE_PROBE_DELAY_SEC);
     k_timer_start(&ctx->ntn_timer,
-                  K_MSEC(delay_ms),
+                  K_SECONDS(APP_NTN_LTE_PROBE_DELAY_SEC),
                   K_NO_WAIT);
 //#endif
 
@@ -1193,6 +1260,9 @@ static enum smf_state_result ntn_connected_run(void *obj)
 
     switch (ctx->ev.type) {
     case EVT_TIMEOUT:
+        LOG_WRN("EVT_TIMEOUT in STATE_NTN_CONNECTED active=%s next=%s",
+                rat_name(ctx->active_rat),
+                rat_name(ctx->next_rat));
         LOG_INF("ntn timeout -> entering lte-probe");
         transition_to_state(ctx, STATE_LTE_PROBE);
         return SMF_EVENT_HANDLED;
@@ -1258,6 +1328,24 @@ static enum smf_state_result lte_probe_run(void *obj)
     struct app_ctx *ctx = obj;
     
     switch(ctx->ev.type) {
+    case EVT_MODEM_SWITCH_FAIL:
+        LOG_WRN("LTE probe: modem switch failed -> returning to NTN");
+
+        lte_service_set_probe_pending(false);
+
+        err = modem_service_switch_to_ntn();
+        if (err) {
+            LOG_WRN("Could not resume NTN context -> full NTN reconnect");
+            ctx->pdn_up = false;
+            ctx->next_rat = RAT_NTN;
+            transition_to_state(ctx, STATE_NTN_CONNECTING);
+            return SMF_EVENT_HANDLED;
+        }
+
+        ctx->active_rat = RAT_NTN;
+        transition_to_state(ctx, STATE_NTN_CONNECTED);
+        return SMF_EVENT_HANDLED;
+
     case EVT_RSRP_UPDATE:
         LOG_INF("received rsrp update event");
         return SMF_EVENT_HANDLED;
@@ -1378,6 +1466,8 @@ static void backoff_timer_handler(struct k_timer *timer)
 {
     ARG_UNUSED(timer);
 
+    LOG_WRN("backoff timeout fired");
+
     struct app_event ev = {
         .type = EVT_TIMEOUT
     };
@@ -1410,6 +1500,9 @@ static enum smf_state_result backoff_run(void *obj)
 
     switch (ctx->ev.type) {
     case EVT_TIMEOUT:
+        LOG_WRN("EVT_TIMEOUT in STATE_BACKOFF active=%s next=%s",
+                rat_name(ctx->active_rat),
+                rat_name(ctx->next_rat));
         if (ctx->next_rat != RAT_NTN) {
             LOG_INF("Retry LTE connect");
             transition_to_state(ctx, STATE_LTEM_CONNECTING);
