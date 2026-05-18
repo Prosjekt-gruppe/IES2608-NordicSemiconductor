@@ -58,3 +58,11 @@ ntn_log.txt
 **/data/raw/*
 **/ppk/output/*
 **/scripts/data/*
+
+
+# LaTeX build artifacts
+docs/latex/**/*.aux
+docs/latex/**/*.log
+docs/latex/**/*.fdb_latexmk
+docs/latex/**/*.fls
+docs/latex/**/*.synctex.gz
