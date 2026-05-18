@@ -36,6 +36,36 @@ STATE_LABELS = {
     "STATE_IDLE": "Idle",
 }
 
+IMPORTANT_PLOT_LABELS = {
+    "Measurement start",
+    "LTE-M connecting",
+    "LTE-M fallback",
+    "Starting NTN",
+    "Switched to NTN",
+    "LTE probe",
+    "LTE-M recovered",
+    "Stay on NTN",
+    "Cloud connected",
+    "Cloud disconnected",
+    "Cloud connecting",
+    "GNSS acquire",
+    "GNSS fix",
+    "PDN up",
+    "PDN down",
+}
+
+PLOT_IGNORED_STATES = {
+    "STATE_DISCONNECTED",
+    "STATE_CONNECTED",
+    "STATE_RUNNING",
+}
+
+SUMMARY_IGNORED_STATES = {
+    "STATE_CONNECTED",
+    "STATE_DISCONNECTED",
+    "STATE_RUNNING",
+}
+
 DEFAULT_SAMPLE_RATE_HZ = 100_000.0
 DEFAULT_VOLTAGE_MV = 3300.0
 
@@ -95,6 +125,23 @@ def parse_args() -> argparse.Namespace:
         "--no-show",
         action="store_true",
         help="Do not show interactive plot window.",
+    )
+    parser.add_argument(
+        "--marker-dedupe-window-s",
+        type=float,
+        default=2.0,
+        help="Suppress repeated visual markers with the same label within this time window.",
+    )
+    parser.add_argument(
+        "--plot-important-only",
+        action="store_true",
+        help="Only show high-level important markers in the plot.",
+    )
+    parser.add_argument(
+        "--summary-min-duration-s",
+        type=float,
+        default=0.0,
+        help="Exclude state intervals shorter than this duration from state summary.",
     )
     return parser.parse_args()
 
@@ -216,29 +263,66 @@ def event_marker(message: str) -> tuple[Optional[str], Optional[str], Optional[s
     return None, None, None, None
 
 
-def build_markers(events: pd.DataFrame, t_column: str) -> list[EventMarker]:
+def build_markers(
+    events: pd.DataFrame,
+    t_column: str,
+) -> list[EventMarker]:
     markers: list[EventMarker] = []
-    last_marker_by_key: dict[str, float] = {}
 
     for _, row in events.iterrows():
         msg = row.get("message", "")
         label, key, from_state, to_state = event_marker(str(msg))
         if not label or not key:
             continue
-
-        x = float(row[t_column])
-        previous_x = last_marker_by_key.get(key)
-        if previous_x is not None and abs(x - previous_x) <= 1.0:
+        if from_state is not None and to_state is None:
             continue
-
-        last_marker_by_key[key] = x
+        if (from_state in SUMMARY_IGNORED_STATES) or (to_state in SUMMARY_IGNORED_STATES):
+            continue
+        x = float(row[t_column])
+        if not math.isfinite(x):
+            continue
         markers.append(EventMarker(t_s=x, label=label, key=key, message=str(msg),
                                    from_state=from_state, to_state=to_state))
 
     return markers
 
 
-def build_state_intervals(markers: Iterable[EventMarker]) -> list[tuple[str, float, float]]:
+def build_plot_markers(
+    markers: Iterable[EventMarker],
+    important_only: bool,
+    dedupe_window_s: float,
+) -> list[EventMarker]:
+    filtered = [
+        marker
+        for marker in markers
+        if not ((marker.from_state in PLOT_IGNORED_STATES) or (marker.to_state in PLOT_IGNORED_STATES))
+    ]
+    if important_only:
+        filtered = [marker for marker in filtered if marker.label in IMPORTANT_PLOT_LABELS]
+
+    output: list[EventMarker] = []
+    last_marker_by_label: dict[str, float] = {}
+    last_to_state: Optional[str] = None
+
+    for marker in filtered:
+        if marker.to_state is not None and marker.to_state == last_to_state:
+            continue
+        previous_x = last_marker_by_label.get(marker.label)
+        if previous_x is not None and abs(marker.t_s - previous_x) <= dedupe_window_s:
+            continue
+
+        if marker.to_state is not None:
+            last_to_state = marker.to_state
+        last_marker_by_label[marker.label] = marker.t_s
+        output.append(marker)
+
+    return output
+
+
+def build_state_intervals(
+    markers: Iterable[EventMarker],
+    ignored_states: Optional[set[str]] = None,
+) -> list[tuple[str, float, float]]:
     transitions = [m for m in markers if m.to_state]
     transitions.sort(key=lambda item: item.t_s)
 
@@ -246,17 +330,26 @@ def build_state_intervals(markers: Iterable[EventMarker]) -> list[tuple[str, flo
         return []
 
     intervals: list[tuple[str, float, float]] = []
-    current_state = transitions[0].from_state or transitions[0].to_state
-    current_start = transitions[0].t_s
+    ignored = ignored_states or set()
+    current_state: Optional[str] = None
+    current_start: float = 0.0
 
     for marker in transitions:
-        if marker.to_state is None:
+        if marker.to_state is None or marker.to_state in ignored:
             continue
 
-        if current_state is not None and marker.t_s >= current_start:
+        if current_state is None:
+            current_state = marker.to_state
+            current_start = marker.t_s
+            continue
+
+        if marker.t_s < current_start:
+            continue
+
+        if current_state != marker.to_state:
             intervals.append((current_state, current_start, marker.t_s))
-        current_state = marker.to_state
-        current_start = marker.t_s
+            current_state = marker.to_state
+            current_start = marker.t_s
 
     return intervals
 
@@ -267,25 +360,33 @@ def compute_state_stats(
     sample_rate: float,
     voltage_mv: float,
     include_clipped: bool,
+    summary_min_duration_s: float,
 ) -> pd.DataFrame:
     rows = []
     for state, start_s, end_s in intervals:
+        if state in SUMMARY_IGNORED_STATES:
+            continue
         if end_s <= start_s:
             continue
         start_idx = max(0, int(math.floor(start_s * sample_rate)))
         end_idx = min(len(samples), int(math.floor(end_s * sample_rate)))
         if end_idx <= start_idx:
             continue
+        duration_s = end_s - start_s
+        if duration_s < summary_min_duration_s:
+            continue
         slice_samples = samples[start_idx:end_idx]
-        avg_uA = float(np.nanmean(slice_samples)) if len(slice_samples) else float("nan")
+        charge = compute_charge_metrics(slice_samples, sample_rate, include_clipped)
+        avg_uA = (
+            charge["charge_C"] * 1e6 / duration_s
+            if duration_s > 0
+            else float("nan")
+        )
         min_uA = float(np.nanmin(slice_samples)) if len(slice_samples) else float("nan")
         max_uA = float(np.nanmax(slice_samples)) if len(slice_samples) else float("nan")
-        duration_s = end_s - start_s
         energy_uwh = None
         if voltage_mv and not math.isnan(avg_uA):
             energy_uwh = avg_uA * voltage_mv * duration_s / 3_600_000.0
-
-        charge = compute_charge_metrics(slice_samples, sample_rate, include_clipped)
 
         rows.append(
             {
@@ -296,8 +397,6 @@ def compute_state_stats(
                 "max_uA": max_uA,
                 "energy_uWh": energy_uwh,
                 "charge_C": charge["charge_C"],
-                "charge_mC": charge["charge_mC"],
-                "charge_uAh": charge["charge_uAh"],
                 "charge_C_clipped": charge.get("charge_C_clipped"),
             }
         )
@@ -319,19 +418,60 @@ def compute_state_stats(
         )
 
     df = pd.DataFrame(rows)
-    return df.groupby("state", as_index=False).agg(
+    grouped = df.groupby("state", as_index=False).agg(
         {
             "duration_s": "sum",
-            "avg_uA": "mean",
             "min_uA": "min",
             "max_uA": "max",
             "energy_uWh": "sum",
             "charge_C": "sum",
-            "charge_mC": "sum",
-            "charge_uAh": "sum",
             "charge_C_clipped": "sum",
         }
     )
+    grouped["avg_uA"] = grouped.apply(
+        lambda row: row["charge_C"] * 1e6 / row["duration_s"]
+        if row["duration_s"] > 0
+        else float("nan"),
+        axis=1,
+    )
+    grouped["charge_mC"] = grouped["charge_C"] * 1e3
+    grouped["charge_uAh"] = grouped["charge_C"] * 1e6 / 3600.0
+    ordered_columns = [
+        "state",
+        "duration_s",
+        "avg_uA",
+        "min_uA",
+        "max_uA",
+        "energy_uWh",
+        "charge_C",
+        "charge_mC",
+        "charge_uAh",
+        "charge_C_clipped",
+    ]
+    return grouped[[col for col in ordered_columns if col in grouped.columns]]
+
+
+def state_stats_consistency_warnings(state_stats: pd.DataFrame) -> list[str]:
+    warnings: list[str] = []
+    if state_stats.empty:
+        return warnings
+
+    for _, row in state_stats.iterrows():
+        duration_s = float(row.get("duration_s", 0.0))
+        avg_uA = float(row.get("avg_uA", float("nan")))
+        charge_C = float(row.get("charge_C", float("nan")))
+        if duration_s <= 0 or not math.isfinite(avg_uA) or not math.isfinite(charge_C):
+            continue
+        expected = avg_uA * 1e-6 * duration_s
+        tolerance = max(1e-6, abs(charge_C) * 1e-3)
+        if abs(expected - charge_C) > tolerance:
+            state = row.get("state", "<unknown>")
+            warnings.append(
+                f"State summary mismatch for {state}: charge_C={charge_C:.6f}, "
+                f"expected={expected:.6f} (duration_s={duration_s:.3f}, avg_uA={avg_uA:.2f})."
+            )
+
+    return warnings
 
 
 def compute_charge_metrics(
@@ -500,8 +640,13 @@ def main() -> None:
     else:
         events["t_s"] = float("nan")
 
-    markers = build_markers(events, "t_s")
-    intervals = build_state_intervals(markers)
+    all_markers = build_markers(events, "t_s")
+    plot_markers = build_plot_markers(
+        all_markers,
+        important_only=args.plot_important_only,
+        dedupe_window_s=args.marker_dedupe_window_s,
+    )
+    intervals = build_state_intervals(all_markers, ignored_states=SUMMARY_IGNORED_STATES)
     has_negative_samples = bool(np.any(samples < 0)) if len(samples) else False
     state_stats = compute_state_stats(
         intervals,
@@ -509,6 +654,7 @@ def main() -> None:
         sample_rate,
         args.voltage_mv,
         include_clipped=has_negative_samples,
+        summary_min_duration_s=args.summary_min_duration_s,
     )
     if not has_negative_samples:
         state_stats = state_stats.drop(columns=["charge_C_clipped"], errors="ignore")
@@ -522,7 +668,7 @@ def main() -> None:
                 "to": marker.to_state,
                 "message": marker.message,
             }
-            for marker in markers
+            for marker in all_markers
             if marker.from_state or marker.to_state
         ]
     )
@@ -546,6 +692,7 @@ def main() -> None:
     warnings = alignment_warnings(events, len(samples), sample_rate)
     if has_negative_samples:
         warnings.append("Negative current samples detected; clipped charge reported.")
+    warnings.extend(state_stats_consistency_warnings(state_stats))
 
     print("Summary:")
     for key, value in overall.items():
@@ -565,7 +712,7 @@ def main() -> None:
     plot_capture(
         samples,
         sample_rate,
-        markers,
+        plot_markers,
         Path(args.plot_output) if args.plot_output else None,
         show_plot=not args.no_show,
     )
