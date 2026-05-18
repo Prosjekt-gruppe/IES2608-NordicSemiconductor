@@ -14,10 +14,14 @@
 #include <errno.h>
 #include <iso646.h>
 #include <stdint.h>
+#include <stdlib.h>
+#include <string.h>
 
 #include <modem/lte_lc.h>
+#include <nrf_modem_at.h>
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
+#include <zephyr/sys/util.h>
 
 #ifndef CONFIG_APP_MODEM_SIGNAL_POLL_INTERVAL_STILL_SEC
 #define CONFIG_APP_MODEM_SIGNAL_POLL_INTERVAL_STILL_SEC \
@@ -39,6 +43,7 @@ enum rsrp_mode {
 	RSRP_MODE_IDLE,		
 	RSRP_MODE_MONITOR,
 	RSRP_MODE_PROBE,
+	RSRP_MODE_NTN_MONITOR,
 };
 
 static enum rsrp_mode current_mode;
@@ -59,6 +64,16 @@ static uint8_t rsrp_history_next_idx;
 static uint8_t rsrp_history_count;
 static uint8_t weak_sample_count;
 static uint8_t unavailable_sample_count;
+
+struct ntn_monitor_sample {
+	int reg_status;
+	int band;
+	char cell_id[16];
+	int phys_cell_id;
+	int earfcn;
+	int rsrp;
+	int snr;
+};
 
 static void reset_signal_tracking(void)
 {
@@ -257,6 +272,98 @@ static int rsrp_service_conn_eval_get(struct lte_lc_conn_eval_params *params)
 	return 0;
 }
 
+static bool parse_int_token(const char *token, int *value)
+{
+	char *end = NULL;
+	long parsed;
+
+	if (token == NULL || value == NULL) {
+		return false;
+	}
+
+	parsed = strtol(token, &end, 10);
+	if (end == token) {
+		return false;
+	}
+
+	*value = (int)parsed;
+	return true;
+}
+
+static int rsrp_service_ntn_monitor_get(struct ntn_monitor_sample *sample)
+{
+	char response[256] = {0};
+	char payload[256] = {0};
+	char *prefix;
+	char *cursor;
+	char *saveptr = NULL;
+	char *tokens[16] = {0};
+	int token_count = 0;
+	int err;
+
+	if (sample == NULL) {
+		return -EINVAL;
+	}
+
+	err = nrf_modem_at_cmd(response, sizeof(response), "AT%%XMONITOR");
+	if (err) {
+		if (err > 0) {
+			LOG_WRN("AT%%XMONITOR failed: raw=%d type=%d at_err=%d",
+				err, nrf_modem_at_err_type(err), nrf_modem_at_err(err));
+		} else {
+			LOG_WRN("AT%%XMONITOR failed: lib err=%d", err);
+		}
+		return err;
+	}
+
+	prefix = strstr(response, "%XMONITOR:");
+	if (prefix == NULL) {
+		/* TODO: Confirm %XMONITOR response format for NTN firmware. */
+		return -ENOTSUP;
+	}
+
+	cursor = prefix + strlen("%XMONITOR:");
+	while (*cursor == ' ') {
+		cursor++;
+	}
+
+	strncpy(payload, cursor, sizeof(payload) - 1U);
+	for (char *p = payload; *p != '\0'; p++) {
+		if (*p == '\r' || *p == '\n') {
+			*p = '\0';
+			break;
+		}
+	}
+
+	for (char *token = strtok_r(payload, ",", &saveptr);
+	     token != NULL && token_count < (int)ARRAY_SIZE(tokens);
+	     token = strtok_r(NULL, ",", &saveptr)) {
+		tokens[token_count++] = token;
+	}
+
+	if (token_count < 12) {
+		/* TODO: Confirm %XMONITOR response format for NTN firmware. */
+		return -ENOTSUP;
+	}
+
+	/* Expected order: reg_status, full_name, short_name, plmn, tac, cell_id,
+	 * phys_cell_id, earfcn, band, rsrp, rsrq, snr.
+	 */
+	if (not parse_int_token(tokens[0], &sample->reg_status) ||
+	    not parse_int_token(tokens[6], &sample->phys_cell_id) ||
+	    not parse_int_token(tokens[7], &sample->earfcn) ||
+	    not parse_int_token(tokens[8], &sample->band) ||
+	    not parse_int_token(tokens[9], &sample->rsrp) ||
+	    not parse_int_token(tokens[11], &sample->snr)) {
+		/* TODO: Confirm %XMONITOR response format for NTN firmware. */
+		return -ENOTSUP;
+	}
+
+	strncpy(sample->cell_id, tokens[5], sizeof(sample->cell_id) - 1U);
+
+	return 0;
+}
+
 static void rsrp_work_handler(struct k_work *work)
 {
 	int err;
@@ -364,6 +471,31 @@ static void rsrp_work_handler(struct k_work *work)
 		current_mode = RSRP_MODE_IDLE;
 		return;
 
+	case RSRP_MODE_NTN_MONITOR: {
+		struct ntn_monitor_sample sample = {0};
+		uint32_t next_interval_sec;
+
+		err = rsrp_service_ntn_monitor_get(&sample);
+		next_interval_sec = monitor_poll_interval_sec;
+		if (next_interval_sec == 0U) {
+			next_interval_sec = CONFIG_APP_MODEM_SIGNAL_POLL_INTERVAL_STILL_SEC;
+		}
+
+		if (err) {
+			LOG_WRN("NTN monitor read failed: err=%d, next=%u s",
+				err, next_interval_sec);
+			(void)k_work_reschedule(&rsrp_work, K_SECONDS(next_interval_sec));
+			return;
+		}
+
+		LOG_INF("NTN monitor: reg=%d band=%d cell=%s pci=%d earfcn=%d rsrp=%d snr=%d",
+			sample.reg_status, sample.band, sample.cell_id, sample.phys_cell_id,
+			sample.earfcn, sample.rsrp, sample.snr);
+
+		(void)k_work_reschedule(&rsrp_work, K_SECONDS(next_interval_sec));
+		return;
+	}
+
 	case RSRP_MODE_IDLE:
 	default:
 		return;
@@ -466,6 +598,31 @@ int rsrp_service_start_probe(uint8_t samples)
 	probe_sample_target = samples;
 
 	return k_work_reschedule(&rsrp_work, K_NO_WAIT);
+}
+
+int rsrp_service_start_ntn_monitor(void)
+{
+	if (not service_initialized) {
+		return -EINVAL;
+	}
+
+	if (current_mode == RSRP_MODE_NTN_MONITOR) {
+		LOG_INF("NTN monitor already running");
+		if (monitor_poll_interval_sec == 0U) {
+			monitor_poll_interval_sec = CONFIG_APP_MODEM_SIGNAL_POLL_INTERVAL_STILL_SEC;
+		}
+		return k_work_reschedule(&rsrp_work, K_SECONDS(monitor_poll_interval_sec));
+	}
+
+	current_mode = RSRP_MODE_NTN_MONITOR;
+	reset_signal_tracking();
+	if (monitor_poll_interval_sec == 0U) {
+		monitor_poll_interval_sec = CONFIG_APP_MODEM_SIGNAL_POLL_INTERVAL_STILL_SEC;
+	}
+
+	LOG_INF("Starting NTN monitor: interval=%u s", monitor_poll_interval_sec);
+
+	return k_work_reschedule(&rsrp_work, K_SECONDS(monitor_poll_interval_sec));
 }
 
 

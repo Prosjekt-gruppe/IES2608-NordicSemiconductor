@@ -31,7 +31,7 @@
 LOG_MODULE_REGISTER(app_sm, LOG_LEVEL_INF);
 
 #define APP_GNSS_FIX_MAX_AGE_SEC 300
-#define APP_NTN_LTE_PROBE_DELAY_SEC 30
+#define APP_NTN_LTE_PROBE_DELAY_SEC 100
 
 /* TEMP: hardcoded NTN test location (disable by setting to 0) */
 #define APP_NTN_TEST_LOCATION_ENABLED 0
@@ -1243,6 +1243,8 @@ static void ntn_connected_entry(void *obj)
 {
     struct app_ctx *ctx = obj;
 
+    (void)rsrp_service_start_ntn_monitor();
+
 /* force lte probe check after 5s for test change to 50 or something later */
 //#if defined(CONFIG_APP_CORE_SM_PROBE_TEST)
     LOG_INF("Starting ntn probe timer: %d sec", APP_NTN_LTE_PROBE_DELAY_SEC);
@@ -1291,6 +1293,7 @@ static void ntn_connected_exit(void *obj)
     LOG_INF("ntn connected exit");
     struct app_ctx *ctx = obj;
     k_timer_stop(&ctx->ntn_timer);
+    (void)rsrp_service_stop();
     ARG_UNUSED(obj);
 }
 
