@@ -1187,6 +1187,8 @@ static enum smf_state_result ntn_connecting_run(void *obj)
         LOG_INF("ntn connect failed/timeout");
         ctx->pdn_up=false;
 
+        (void)ntn_service_stop();
+
         /* increment NTN connect attempts */
         uint8_t attempts = retry_inc(ctx, RAT_NTN);
 

@@ -25,11 +25,13 @@
 LOG_MODULE_REGISTER(gnss_service, LOG_LEVEL_INF);
 
 #define GNSS_AGNSS_PENDING_EXTENSION_SEC 30
+#define GNSS_AGNSS_PREP_TIMEOUT_SEC 10
+#define GNSS_AGNSS_PREP_RETRY_SEC 1
 
 /* internal state */
 static struct k_work gnss_pvt_work;
 static struct k_work_delayable gnss_timeout_work;
-static struct k_work agnss_request_work;
+static struct k_work_delayable agnss_request_work;
 static struct k_work_delayable agnss_monitor_work;
 
 static struct nrf_modem_gnss_pvt_data_frame pvt_data;
@@ -37,6 +39,7 @@ static struct nrf_modem_gnss_agnss_data_frame agnss_req;
 
 static bool agnss_req_received;
 static int64_t gnss_start_time;
+static int64_t agnss_prepare_start_time;
 static bool first_fix;
 static bool gnss_initialized;
 static bool gnss_running;
@@ -65,6 +68,8 @@ static void agnss_monitor_work_handler(struct k_work *work);
 static int gnss_prepare_agnss(void);
 static int gnss_start_search(void);
 static void gnss_mark_agnss_ready(const char *source);
+static void gnss_fallback_to_standalone(const char *reason, int err);
+static bool agnss_prep_timed_out(void);
 
 /* app event + zbus publish */
 
@@ -136,6 +141,37 @@ static int handle_error(int err)
     /* instead of sending error status double */
     (void)publish_timeout();
     return err;
+}
+
+static void gnss_fallback_to_standalone(const char *reason, int err)
+{
+    if (!gnss_running) {
+        return;
+    }
+
+    assisted_start_in_progress = false;
+    agnss_request_sent = false;
+    agnss_pending_timeout_extended = false;
+    agnss_ready = false;
+    agnss_prepare_start_time = 0;
+
+    (void)k_work_cancel_delayable(&agnss_request_work);
+    (void)k_work_cancel_delayable(&agnss_monitor_work);
+
+    LOG_WRN("A-GNSS unavailable (%s, err=%d), continuing standalone GNSS search",
+            reason, err);
+    (void)gnss_service_start_timeout(CONFIG_APP_GNSS_TIMEOUT_SEC);
+}
+
+static bool agnss_prep_timed_out(void)
+{
+    if (agnss_prepare_start_time == 0) {
+        return false;
+    }
+
+    int64_t elapsed_ms = k_uptime_get() - agnss_prepare_start_time;
+
+    return elapsed_ms >= (int64_t)GNSS_AGNSS_PREP_TIMEOUT_SEC * MSEC_PER_SEC;
 }
 
 /* helpers */
@@ -254,7 +290,7 @@ static void gnss_event_handler(int event)
 
         if (assisted_start_in_progress) {
             LOG_INF("Submitting A-GNSS request work (assisted mode)");
-            k_work_submit(&agnss_request_work);
+            (void)k_work_reschedule(&agnss_request_work, K_NO_WAIT);
         } else {
             LOG_INF("GNSS A-GNSS request ignored (standalone mode)");
         }
@@ -280,9 +316,10 @@ int gnss_service_init(void)
     agnss_req_received = false;
     agnss_request_sent = false;
     agnss_pending_timeout_extended = false;
+    agnss_prepare_start_time = 0;
 
     k_work_init(&gnss_pvt_work, gnss_pvt_work_handler);
-    k_work_init(&agnss_request_work, agnss_request_work_handler);
+    k_work_init_delayable(&agnss_request_work, agnss_request_work_handler);
     k_work_init_delayable(&agnss_monitor_work, agnss_monitor_work_handler);
     k_work_init_delayable(&gnss_timeout_work, gnss_timeout_work_handler);
 
@@ -334,7 +371,7 @@ static int gnss_prepare_agnss(void)
     LOG_INF("gnss_prepare_agnss: entry");
 
     if (!cloud_service_is_connected()) {
-        LOG_ERR("Cloud not connected");
+        LOG_WRN("Cloud not connected");
         return -ENOTCONN;
     }
 
@@ -387,6 +424,10 @@ int gnss_service_start_assisted(int32_t timeout_sec)
     agnss_request_sent = false;
     agnss_pending_timeout_extended = false;
     assisted_start_in_progress = true;
+    agnss_prepare_start_time = k_uptime_get();
+
+    (void)k_work_cancel_delayable(&agnss_request_work);
+    (void)k_work_cancel_delayable(&agnss_monitor_work);
 
     LOG_INF("Starting GNSS in assisted mode (awaiting A-GNSS request)");
 
@@ -409,8 +450,29 @@ static void agnss_request_work_handler(struct k_work *work)
 {
     ARG_UNUSED(work);
 
+    if (!assisted_start_in_progress) {
+        return;
+    }
+
     int err = gnss_prepare_agnss();
     if (err) {
+        if (err == -ENOTCONN) {
+            gnss_fallback_to_standalone("cloud disconnected", err);
+            return;
+        }
+
+        if (err == -EAGAIN) {
+            if (agnss_prep_timed_out()) {
+                gnss_fallback_to_standalone("A-GNSS prep timed out", err);
+            } else {
+                LOG_WRN("A-GNSS not ready, retrying in %d sec",
+                        GNSS_AGNSS_PREP_RETRY_SEC);
+                (void)k_work_reschedule(&agnss_request_work,
+                                        K_SECONDS(GNSS_AGNSS_PREP_RETRY_SEC));
+            }
+            return;
+        }
+
         LOG_ERR("gnss_prepare_agnss failed: %d", err);
     }
 }
@@ -461,6 +523,7 @@ static void gnss_mark_agnss_ready(const char *source)
     agnss_request_sent = false;
     agnss_pending_timeout_extended = false;
     assisted_start_in_progress = false;
+    agnss_prepare_start_time = 0;
 
     LOG_INF("Continuing GNSS search after A-GNSS; timeout extended by %d sec",
             CONFIG_APP_GNSS_TIMEOUT_SEC);
@@ -517,11 +580,13 @@ int gnss_service_stop(void)
 
     if (!err) {
         (void)k_work_cancel_delayable(&agnss_monitor_work);
+        (void)k_work_cancel_delayable(&agnss_request_work);
         gnss_running = false;
         agnss_ready = false;
         agnss_request_sent = false;
         agnss_pending_timeout_extended = false;
         assisted_start_in_progress = false;
+        agnss_prepare_start_time = 0;
         LOG_INF("GNSS stopped");
     }
 

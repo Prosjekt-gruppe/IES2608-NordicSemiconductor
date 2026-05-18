@@ -139,7 +139,7 @@ static void ntn_evt_handler(const struct ntn_evt *evt)
                 evt->location_request.requested,
                 (unsigned int)evt->location_request.accuracy);
 
-        if (evt->location_request.requested) {
+        if (evt->location_request.requested && active_ctx != NULL) {
             (void)k_work_submit(&ntn_location_work);
         }
         break;
@@ -326,6 +326,27 @@ int ntn_service_connect(struct app_ctx *ctx)
 
     /* start modem */
     return lte_lc_connect_async(ntn_lc_evt_handler);
+}
+
+int ntn_service_stop(void)
+{
+    int err;
+
+    (void)k_work_cancel(&ntn_location_work);
+
+    if (active_ctx != NULL) {
+        active_ctx->ntn_initialized = false;
+    }
+
+    active_ctx = NULL;
+
+    err = lte_lc_offline();
+    if (err) {
+        LOG_WRN("lte_lc_offline failed while stopping NTN: %d", err);
+    }
+
+    LOG_INF("NTN service stopped");
+    return err;
 }
 
 

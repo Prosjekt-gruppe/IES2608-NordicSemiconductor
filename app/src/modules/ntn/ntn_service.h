@@ -10,6 +10,7 @@
 
 //int ntn_service_prepare(struct app_ctx *ctx);
 int ntn_service_connect(struct app_ctx *ctx);
+int ntn_service_stop(void);
 int ntn_service_switch_to_tn(void);
 int modem_service_switch_to_ntn(void);
 int ntn_service_init(void);
