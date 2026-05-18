@@ -67,6 +67,9 @@ static uint8_t unavailable_sample_count;
 
 struct ntn_monitor_sample {
 	int reg_status;
+	char plmn[8];
+	char tac[8];
+	int act;
 	int band;
 	char cell_id[16];
 	int phys_cell_id;
@@ -290,6 +293,22 @@ static bool parse_int_token(const char *token, int *value)
 	return true;
 }
 
+static void strip_quotes_inplace(char *token)
+{
+	size_t len;
+
+	if (token == NULL) {
+		return;
+	}
+
+	len = strlen(token);
+	if (len >= 2U && token[0] == '"' && token[len - 1U] == '"') {
+		memmove(token, token + 1U, len - 2U);
+		token[len - 2U] = '\0';
+	}
+}
+
+/* This parser handles the observed NTN %XMONITOR response format used for observability only. */
 static int rsrp_service_ntn_monitor_get(struct ntn_monitor_sample *sample)
 {
 	char response[256] = {0};
@@ -342,24 +361,49 @@ static int rsrp_service_ntn_monitor_get(struct ntn_monitor_sample *sample)
 	}
 
 	if (token_count < 12) {
-		/* TODO: Confirm %XMONITOR response format for NTN firmware. */
+		LOG_WRN("XMONITOR parse failed: token_count=%d raw=%s", token_count, response);
 		return -ENOTSUP;
 	}
 
-	/* Expected order: reg_status, full_name, short_name, plmn, tac, cell_id,
-	 * phys_cell_id, earfcn, band, rsrp, rsrq, snr.
+	strip_quotes_inplace(tokens[3]);
+	strip_quotes_inplace(tokens[4]);
+	strip_quotes_inplace(tokens[7]);
+
+	/* Expected order: reg_status, full_name, short_name, plmn, tac, act, band,
+	 * cell_id, phys_cell_id, earfcn, rsrp, snr.
 	 */
-	if (not parse_int_token(tokens[0], &sample->reg_status) ||
-	    not parse_int_token(tokens[6], &sample->phys_cell_id) ||
-	    not parse_int_token(tokens[7], &sample->earfcn) ||
-	    not parse_int_token(tokens[8], &sample->band) ||
-	    not parse_int_token(tokens[9], &sample->rsrp) ||
-	    not parse_int_token(tokens[11], &sample->snr)) {
-		/* TODO: Confirm %XMONITOR response format for NTN firmware. */
+	if (not parse_int_token(tokens[0], &sample->reg_status)) {
+		LOG_WRN("XMONITOR parse failed: reg token[0]=%s raw=%s", tokens[0], response);
+		return -ENOTSUP;
+	}
+	if (not parse_int_token(tokens[5], &sample->act)) {
+		LOG_WRN("XMONITOR parse failed: act token[5]=%s raw=%s", tokens[5], response);
+		return -ENOTSUP;
+	}
+	if (not parse_int_token(tokens[6], &sample->band)) {
+		LOG_WRN("XMONITOR parse failed: band token[6]=%s raw=%s", tokens[6], response);
+		return -ENOTSUP;
+	}
+	if (not parse_int_token(tokens[8], &sample->phys_cell_id)) {
+		LOG_WRN("XMONITOR parse failed: pci token[8]=%s raw=%s", tokens[8], response);
+		return -ENOTSUP;
+	}
+	if (not parse_int_token(tokens[9], &sample->earfcn)) {
+		LOG_WRN("XMONITOR parse failed: earfcn token[9]=%s raw=%s", tokens[9], response);
+		return -ENOTSUP;
+	}
+	if (not parse_int_token(tokens[10], &sample->rsrp)) {
+		LOG_WRN("XMONITOR parse failed: rsrp token[10]=%s raw=%s", tokens[10], response);
+		return -ENOTSUP;
+	}
+	if (not parse_int_token(tokens[11], &sample->snr)) {
+		LOG_WRN("XMONITOR parse failed: snr token[11]=%s raw=%s", tokens[11], response);
 		return -ENOTSUP;
 	}
 
-	strncpy(sample->cell_id, tokens[5], sizeof(sample->cell_id) - 1U);
+	strncpy(sample->plmn, tokens[3], sizeof(sample->plmn) - 1U);
+	strncpy(sample->tac, tokens[4], sizeof(sample->tac) - 1U);
+	strncpy(sample->cell_id, tokens[7], sizeof(sample->cell_id) - 1U);
 
 	return 0;
 }
@@ -488,9 +532,10 @@ static void rsrp_work_handler(struct k_work *work)
 			return;
 		}
 
-		LOG_INF("NTN monitor: reg=%d band=%d cell=%s pci=%d earfcn=%d rsrp=%d snr=%d",
-			sample.reg_status, sample.band, sample.cell_id, sample.phys_cell_id,
-			sample.earfcn, sample.rsrp, sample.snr);
+		LOG_INF("NTN monitor: reg=%d act=%d plmn=%s tac=%s band=%d cell=%s pci=%d earfcn=%d rsrp=%d snr=%d",
+			sample.reg_status, sample.act, sample.plmn, sample.tac, sample.band,
+			sample.cell_id, sample.phys_cell_id, sample.earfcn,
+			sample.rsrp, sample.snr);
 
 		(void)k_work_reschedule(&rsrp_work, K_SECONDS(next_interval_sec));
 		return;

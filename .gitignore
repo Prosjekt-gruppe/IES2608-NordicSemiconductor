@@ -66,3 +66,4 @@ docs/latex/**/*.log
 docs/latex/**/*.fdb_latexmk
 docs/latex/**/*.fls
 docs/latex/**/*.synctex.gz
+.conda
