@@ -46,6 +46,11 @@ enum rsrp_mode {
 	RSRP_MODE_NTN_MONITOR,
 };
 
+/*
+ * RSRP is sampled from a delayable work item. Monitor mode watches LTE-M for
+ * fallback, probe mode checks if LTE-M is good enough to switch back from NTN,
+ * and NTN monitor mode only prints observability data from AT%XMONITOR.
+ */
 static enum rsrp_mode current_mode;
 static uint8_t probe_sample_target;
 
@@ -59,6 +64,10 @@ static uint32_t motion_speed_mm_s;
 static uint32_t motion_linear_accel_mg;
 static uint32_t monitor_poll_interval_sec = CONFIG_APP_MODEM_SIGNAL_POLL_INTERVAL_SEC;
 
+/*
+ * The short history is used both for trend detection and for probe averaging.
+ * It is intentionally small so fallback reacts during a field test drive.
+ */
 static int rsrp_history_dbm[RSRP_HISTORY_LEN];
 static uint8_t rsrp_history_next_idx;
 static uint8_t rsrp_history_count;
@@ -182,6 +191,10 @@ static bool should_publish_lte_poor(int rsrp_dbm)
 	bool worsening;
 	bool weak_for_too_long = false;
 
+	/*
+	 * One weak sample is not enough for fallback. The monitor waits for a
+	 * sharp drop, a clear downward trend, or repeated weak samples.
+	 */
 	if (weak_signal) {
 		if (weak_sample_count < UINT8_MAX) {
 			weak_sample_count++;
@@ -308,7 +321,10 @@ static void strip_quotes_inplace(char *token)
 	}
 }
 
-/* This parser handles the observed NTN %XMONITOR response format used for observability only. */
+/*
+ * NTN signal data is not exposed through the normal LTE conn-eval API here.
+ * %XMONITOR is only used for logs, so parsing stays conservative.
+ */
 static int rsrp_service_ntn_monitor_get(struct ntn_monitor_sample *sample)
 {
 	char response[256] = {0};
@@ -337,7 +353,7 @@ static int rsrp_service_ntn_monitor_get(struct ntn_monitor_sample *sample)
 
 	prefix = strstr(response, "%XMONITOR:");
 	if (prefix == NULL) {
-		/* TODO: Confirm %XMONITOR response format for NTN firmware. */
+		/* Modem firmware versions have not all used the same XMONITOR text. */
 		return -ENOTSUP;
 	}
 
@@ -573,6 +589,7 @@ int rsrp_service_get(int *rsrp_dbm)
 		return 0;
 	}
 
+	/* Nordic reports RSRP as an index where 1 means -140 dBm and 97 means -44 dBm. */
 	*rsrp_dbm = params.rsrp - 141;
 
 	return 0;
@@ -675,8 +692,6 @@ int rsrp_service_stop(void)
 {
 	if (current_mode == RSRP_MODE_IDLE) {
 		LOG_INF("LTE-M RSRP monitor already stopped");
-		// redundant?
-		//reset_signal_tracking();
 		return 0;
 	}
 

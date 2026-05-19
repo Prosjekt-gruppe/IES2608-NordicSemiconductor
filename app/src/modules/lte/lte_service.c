@@ -56,8 +56,9 @@ static const char *lte_mode_name(enum lte_lc_lte_mode mode)
 }
 
 /*
-* TODO: filter modem events based on active rat
-*/
+ * LTE callbacks can arrive after we have started a RAT switch. Each event is
+ * tagged with source_rat so the state machine can ignore stale callbacks.
+ */
 static void lte_lc_evt_handler(const struct lte_lc_evt *const evt)
 {
     switch (evt->type) {

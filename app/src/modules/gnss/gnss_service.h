@@ -10,6 +10,11 @@
 
 int gnss_service_init(void);
 int gnss_service_start(void);
+
+/*
+ * Assisted start first waits for the modem's A-GNSS request. That request is
+ * what tells nRF Cloud exactly which assistance data the modem needs.
+ */
 int gnss_service_start_assisted(int32_t timeout_sec);
 int gnss_service_stop(void);
 int gnss_service_start_timeout(int32_t timeout_sec);

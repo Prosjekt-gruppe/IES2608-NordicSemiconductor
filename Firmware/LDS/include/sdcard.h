@@ -2,15 +2,17 @@
 
 
 void SDinit(){
-  // Initialize SD card at 25 MHz (safe for most SD modules)
+  // Keep SPI speed conservative because bad SD writes would ruin the field log.
   if (!SD.begin(CS, SPI, 25000000)) {
     Serial.println("Card Mount Failed");
-    while (true) { delay(1000); } // halt safely
+    // Logging cannot continue without an SD card.
+    while (true) { delay(1000); }
   }
   uint8_t cardType = SD.cardType();
   if (cardType == CARD_NONE) {
     Serial.println("No SD card attached");
-    while (true) { delay(1000); } // halt safely
+    // Logging cannot continue without an SD card.
+    while (true) { delay(1000); }
   }
   Serial.println("SD card initialized successfully!");
 
@@ -82,7 +84,7 @@ void readFile(fs::FS &fs, const char * path){
   file.close();
 }
 
-//Checks if file exists and if not, it creates 
+// Create each CSV file once so repeated boots append below the same header.
 void createFile(fs::FS &fs, const char * path, const char * header){
   if (!fs.exists(path)) {
     Serial.println("File doesn't exist. Creating...");
@@ -180,7 +182,8 @@ String readLastLines(const char *path, int n) {
   File file = SD.open(path);
   if (!file) return "";
 
-  String lines[10]; // max 10 linjer
+  // This helper is only meant for small serial previews, not full CSV dumps.
+  String lines[10];
   int count = 0;
 
   while (file.available()) {

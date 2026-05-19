@@ -7,7 +7,6 @@
 #include "app_events.h"
 
 #include <modem/nrf_modem_lib.h>
-//#include <modem/lte_lc.h>
 #include "modem_service.h"
 #include <nrf_modem_at.h>
 
@@ -22,10 +21,14 @@
 #include <zephyr/logging/log.h>
 #include <zephyr/kernel.h>
 
-/* for udp test */
-#define SERVER_PORT 41313 // port 
-#define SERVER_ADDR "46.226.106.127" // tcpbin.net
+/* tcpbin.net UDP endpoint used only as a small connectivity test. */
+#define SERVER_PORT 41313
+#define SERVER_ADDR "46.226.106.127"
 
+/*
+ * RAT switching is done in a Zephyr work item because the AT command sequence
+ * can sleep while the modem changes function level.
+ */
 static struct k_work switch_work;
 static enum modem_switch_state switch_state;
 static bool initialized;
@@ -70,6 +73,11 @@ static int modem_service_switch(enum modem_access_mode mode)
 {
     int err;
 
+    /*
+     * CFUN=45 is Nordic's modem-offline mode for changing system mode. Some
+     * firmware builds reject it when going back to TN, so TN has a CFUN=0
+     * fallback below.
+     */
     LOG_INF("switch: sending CFUN=45");
     err = modem_at_ok("AT+CFUN=45");
     LOG_INF("switch: CFUN=45 ret=%d", err);
@@ -219,7 +227,6 @@ int modem_service_udp_send_test(void)
     addr.sin_port = htons(SERVER_PORT);
     zsock_inet_pton(AF_INET, SERVER_ADDR, &addr.sin_addr);
 
-    /* send 'a' to tcpbin */
     err = zsock_sendto(sock, "a", 1, 0,
                     (struct sockaddr *)&addr,
                     sizeof(addr));
@@ -254,7 +261,7 @@ int modem_service_udp_send_burst(const struct udp_test_cfg *cfg)
         return -EINVAL;
     }
 
-    /* generate dummy data */
+    /* Fixed dummy payload makes the burst test repeatable in power traces. */
     memset(buf, 0xAA, c->payload_len);
 
     sock = zsock_socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);

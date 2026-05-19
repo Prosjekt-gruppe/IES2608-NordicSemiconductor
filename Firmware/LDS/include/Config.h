@@ -1,12 +1,13 @@
 #include <Arduino.h>
 #include <Wire.h>
 #include <WiFi.h>
-// MicroSD Libraries
+
+// SD-card stack used by the ESP32 logger.
 #include <SD.h>
 #include <SPI.h>
 #include <FS.h>
 
-//Arduino Esp32 nano config
+// Arduino Nano ESP32 pin mapping for I2C and the SD-card SPI bus.
 #define SDA_PIN A4
 #define SCL_PIN A5
 #define masterAdr 0x00
@@ -16,8 +17,6 @@
 #define MISO D12
 #define MOSI D11
 
-
-//Serial config
 #define BAUDRATE 115200
 
 static void ModemSleep(){

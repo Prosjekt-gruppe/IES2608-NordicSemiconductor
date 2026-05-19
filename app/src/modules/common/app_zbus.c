@@ -15,6 +15,11 @@
 
 LOG_MODULE_REGISTER(app_zbus, LOG_LEVEL_INF);
 
+/*
+ * These zbus channels keep sensor and GNSS samples separate from the main app
+ * event channel. They are data streams, not state-machine triggers, so later
+ * modules can subscribe without changing the sensor drivers.
+ */
 ZBUS_CHAN_DEFINE(gnss_status_chan,
 		 struct app_gnss_status,
 		 NULL,

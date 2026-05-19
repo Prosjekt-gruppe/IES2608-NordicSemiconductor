@@ -40,6 +40,7 @@ static int ntn_service_check_modem_fw(void)
     char fw_version[64] = {0};
     int err;
 
+    /* NTN NB-IoT only works with the special nRF9151 NTN modem firmware. */
     err = nrf_modem_at_cmd(fw_version, sizeof(fw_version), "AT+CGMR");
     if (err) {
         if (err > 0) {
@@ -118,6 +119,10 @@ static void ntn_location_work_handler(struct k_work *work)
 
     ARG_UNUSED(work);
 
+    /*
+     * The NTN library asks for a location while the modem is attaching. We do
+     * the ntn_location_set() call in work context instead of inside the callback.
+     */
     if (active_ctx != NULL) {
         err = ntn_service_set_location(active_ctx, 0);
         if (err) {
@@ -298,7 +303,6 @@ int ntn_service_init(void)
     return 0;
 }
 
-/* simple connect attempt */
 int ntn_service_connect(struct app_ctx *ctx)
 {
     int err;
@@ -316,7 +320,7 @@ int ntn_service_connect(struct app_ctx *ctx)
         return err;
     }
     
-/* verbose modem */
+    /* Extra modem registration details are useful when tuning NTN attach. */
 #ifdef CONFIG_APP_DEBUG_NTN
     err = nrf_modem_at_printf("AT+CEREG=5");
     if (err) {
@@ -324,7 +328,6 @@ int ntn_service_connect(struct app_ctx *ctx)
     }
 #endif
 
-    /* start modem */
     return lte_lc_connect_async(ntn_lc_evt_handler);
 }
 

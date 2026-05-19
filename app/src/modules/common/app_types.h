@@ -22,10 +22,14 @@ struct retry_state {
     uint8_t ntn_attempts;
 };
 
-
+/*
+ * These values are laid out like the Zephyr SMF tree. The indented states are
+ * children of the parent state above them, and child states can pass events up
+ * to the parent with SMF_EVENT_PROPAGATE.
+ */
 enum app_state {
     STATE_BOOT,
-    STATE_RUNNING, // parent state
+    STATE_RUNNING,
 
         STATE_DISCONNECTED,
             STATE_BACKOFF,
@@ -52,8 +56,6 @@ enum app_evt_type {
     EVT_START_GNSS,
     EVT_GNSS_FIX,
     EVT_GNSS_TIMEOUT,
-    //EVT_NTN_REG_FAIL,
-    //EVT_NTN_TIMEOUT,
     EVT_TIMEOUT,
     EVT_RSRP_UPDATE,
     EVT_LTE_POOR,
@@ -72,7 +74,10 @@ enum app_evt_type {
     EVT_TN_READY_FOR_PROBE,
 };
 
-// Debug events
+/*
+ * LTE-M can run a small chain of optional steps. This enum prevents the state
+ * machine from immediately repeating the same step when it returns to LTE-M.
+ */
 enum app_step_done {
     STEP_NONE = 0,
     STEP_CLOUD_DONE,
@@ -102,20 +107,20 @@ struct app_ctx {
     struct smf_ctx ctx;
     enum app_state state;
     
-    /* rat overview */
+    /* Current RAT and the RAT we will try after the next backoff. */
     enum rat active_rat;
     enum rat next_rat;
 
     struct retry_state retry;
     
-    /* ltem signal strength*/
+    /* Latest LTE-M signal value used by fallback decisions. */
     int rsrp_dbm;
     int backoff_ms;
     
-    /* cloud */
+    /* Cloud state mirrored here so SMF can decide what step comes next. */
     bool cloud_connected; 
 
-    /* gnss */
+    /* Last GNSS fix. NTN needs this before the modem can attach. */
     bool have_fix;
     int64_t last_fix_uptime_ms;
     struct nrf_modem_gnss_pvt_data_frame last_pvt;
@@ -123,21 +128,24 @@ struct app_ctx {
     int32_t gnss_timeout_sec; 
     bool gnss_extend_once; 
     
-    /* ntn */
+    /* NTN setup state. */
     bool ntn_initialized;
     
-    /* events */
+    /* Copy of the zbus event currently being handled by SMF. */
     struct app_event ev;
 
-    /* lte */
+    /* LTE service state mirrored in the state machine thread. */
    	bool lte_connected;
 
 
 
-    /* ochestration */
+    /* Last completed step in the LTE-M cloud/location/GNSS chain. */
     enum app_step_done last_done; 
 
-    /* timers */
+    /*
+     * Timers publish EVT_TIMEOUT or delayed events back to zbus instead of
+     * calling SMF directly.
+     */
     struct k_timer backoff_timer;
     struct k_timer ntn_timer;
     struct k_timer ntn_connect_timer;
@@ -146,15 +154,7 @@ struct app_ctx {
     struct k_timer handoff_timer;
     enum app_evt_type delayed_event; 
 
-    /* pdn */
+    /* Packet data network state from LTE/NTN callbacks. */
     bool pdn_up;
     
 };
-
-/*
-struct monitor_event {
-    enum app_state state;
-    struct app_event ev;
-    int rsrp_dbm;
-};
-*/

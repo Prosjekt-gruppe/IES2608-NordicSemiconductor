@@ -8,10 +8,10 @@ print(df)
 df["uptime_s"] = pd.to_numeric(df["uptime_s"], errors="coerce")
 df["rsrp"] = pd.to_numeric(df["rsrp"], errors="coerce")
 
-# only conneval rows
+# Keep only connection-evaluation rows before plotting RSRP.
 df = df[df["type"] == "conneval"].copy()
 
-# detect reboot when uptime goes backwards
+# A lower uptime than the previous row means the device rebooted.
 df["session"] = (df["uptime_s"].diff() < 0).cumsum()
 
 plt.figure(figsize=(12, 6))

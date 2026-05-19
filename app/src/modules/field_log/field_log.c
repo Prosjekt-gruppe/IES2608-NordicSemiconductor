@@ -73,6 +73,11 @@ enum field_log_slot_state {
 	FIELD_LOG_SLOT_INVALID,
 };
 
+/*
+ * Flash records are fixed at 32 bytes so dumps can be scanned even after a
+ * reset. There is no file system here; each slot is either erased, valid by
+ * CRC, or treated as the stopping point for the next dump/append.
+ */
 struct field_log_record_header {
 	uint16_t magic;
 	uint8_t version;
@@ -396,6 +401,10 @@ static int field_log_storage_scan(void)
 	struct field_log_record record;
 	enum field_log_slot_state slot_state;
 
+	/*
+	 * On boot we walk flash until the first erased slot. That becomes the
+	 * next append position without needing a separate file system.
+	 */
 	field_log_storage_reset_cursor();
 
 	for (off_t offset = 0; offset + sizeof(record) <= storage.capacity_bytes;
@@ -623,6 +632,11 @@ static const struct field_log_location_sample *field_log_select_best_location(in
 {
 	const struct field_log_location_sample *best = NULL;
 
+	/*
+	 * State records should carry the best location we had at the time, not
+	 * just the newest one. Fresh and accurate samples win, then GNSS/AGNSS is
+	 * preferred over cellular location when the quality is similar.
+	 */
 	for (size_t i = FIELD_LOG_LOCATION_LTE; i <= FIELD_LOG_LOCATION_AGNSS; i++) {
 		const struct field_log_location_sample *candidate = &runtime.locations[i];
 		bool candidate_stale;
@@ -1049,6 +1063,10 @@ static int field_log_enqueue_message(const struct field_log_message *message)
 	return err;
 }
 
+/*
+ * Other modules can call field_log_note_* from callbacks. The message queue
+ * keeps flash writes in this thread where blocking is easier to control.
+ */
 static void field_log_thread(void *arg1, void *arg2, void *arg3)
 {
 	int64_t next_summary_ms;

@@ -3,9 +3,8 @@ import argparse
 import re
 from pathlib import Path
 
-
-
-# Removes injected AT command fragments like:
+# Tera Term captures can include echoed AT commands inside the CSV dump. Remove
+# them before pandas reads the file, otherwise the row columns shift.
 # conn> AT%XDATAPRFL?
 # > AT+CESQ
 # LTE-> AT%XTIME=1
@@ -68,10 +67,6 @@ def clean_line(line: str) -> str | None:
 
     if not line:
         return None
-    
-    #if line.startswith(HEADER_PREFIXES):
-    #    return line
-
     line = AT_FRAGMENT_RE.sub("", line).strip()
 
     if line.startswith("eval,"):

@@ -11,6 +11,11 @@
 
 int rsrp_service_get(int *rsrp_dbm);
 int rsrp_service_sample_and_publish(void);
+
+/*
+ * Monitor mode watches LTE-M for fallback. Probe mode is used from NTN to see
+ * if LTE-M has recovered enough to switch back.
+ */
 int rsrp_service_start_monitor(void);
 int rsrp_service_start_ntn_monitor(void);
 int rsrp_service_start_probe(uint8_t samples);
