@@ -55,7 +55,8 @@ class PatchedPPK2(PPK2_API):
         if not ret:
             return False
 
-        # Simple sanity check: if these are still None, metadata was not really loaded
+        # PPK2 can return a partial metadata response. Empty key fields mean the
+        # parser accepted a broken response, so fail early instead.
         if self.modifiers["Calibrated"] is None and self.modifiers["HW"] is None:
             return False
 
@@ -331,7 +332,7 @@ def ppk_worker(ppk2: PPK2_API) -> None:
                 if samples:
                     arr = np.asarray(samples, dtype=np.float32)
 
-                    # write raw values to binary
+                    # Store raw samples as float32 so the analysis scripts can memory-map them.
                     arr.tofile(raw_file)
                     raw_file.flush()
 
@@ -354,11 +355,10 @@ def ppk_worker(ppk2: PPK2_API) -> None:
                 else:
                     print("[PPK][3s] no samples")
 
-                # reset vindu
                 window_samples.clear()
                 window_start = now
 
-            time.sleep(0.001)  # litt raskere enn før for bedre sampling
+            time.sleep(0.001)
 
     finally:
         ppk2.stop_measuring()
@@ -370,7 +370,7 @@ def ppk_worker(ppk2: PPK2_API) -> None:
 def uart_worker(port: str, baudrate: int) -> None:
     ser = serial.Serial(port, baudrate=baudrate, timeout=0.2)
 
-    # Leave DTR/RTS untouched for now since plain reading worked.
+    # Leave DTR/RTS untouched; toggling them can reset some UART bridges.
     time.sleep(0.1)
     ser.reset_input_buffer()
 
@@ -448,7 +448,7 @@ def main() -> None:
 
             uart_thread.start()
         
-        # start ppk logger
+        # Start PPK before powering the DUT so boot current is included.
         ppk_thread.start()
         if not measurement_started_event.wait(timeout=3.0):
             raise RuntimeError("PPK2 measurement did not start")

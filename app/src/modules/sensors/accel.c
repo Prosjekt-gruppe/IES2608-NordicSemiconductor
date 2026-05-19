@@ -40,6 +40,7 @@ LOG_MODULE_REGISTER(accel, LOG_LEVEL_INF);
 #define ACCEL_MG_TO_MM_S2            9807
 #define ACCEL_MAX_DT_MS              1000
 
+/* Devicetree check lets the same source build on boards without the BMI270. */
 #if DT_HAS_COMPAT_STATUS_OKAY(bosch_bmi270)
 #define ACCEL_NODE DT_COMPAT_GET_ANY_STATUS_OKAY(bosch_bmi270)
 static const struct device *const accel_dev = DEVICE_DT_GET(ACCEL_NODE);
@@ -222,6 +223,11 @@ static void accel_thread(void *arg1, void *arg2, void *arg3)
 	uint32_t last_motion_log_ts_ms = 0;
 	uint32_t last_zbus_publish_ts_ms = 0;
 
+	/*
+	 * BMI270 reports gravity as part of acceleration. The startup baseline is
+	 * our estimate of that gravity vector, and later quiet samples slowly tune it.
+	 * This keeps small board angle changes from looking like movement.
+	 */
 	while (true) {
 		int32_t xyz_mg[3];
 		int32_t linear_xyz_mg[3];
@@ -372,6 +378,7 @@ static void accel_thread(void *arg1, void *arg2, void *arg3)
 			(not motion_state_was_reported) or (is_moving_now != last_reported_moving);
 
 		if (motion_state_has_changed) {
+			/* RSRP polling is faster while moving because coverage changes faster then. */
 			rsrp_service_set_motion_hint(is_moving_now, speed_mm_s, linear_accel_mg);
 
 			if (is_moving_now) {

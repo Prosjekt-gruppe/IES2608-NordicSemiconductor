@@ -33,14 +33,15 @@ LOG_MODULE_REGISTER(app_sm, LOG_LEVEL_INF);
 #define APP_GNSS_FIX_MAX_AGE_SEC 300
 #define APP_NTN_LTE_PROBE_DELAY_SEC 100
 
-/* TEMP: hardcoded NTN test location (disable by setting to 0) */
+/* Test-only location for NTN attach when field GNSS is not being used. */
 #define APP_NTN_TEST_LOCATION_ENABLED 0
 #define APP_NTN_TEST_LAT 63.483591
 #define APP_NTN_TEST_LON 10.550984
 #define APP_NTN_TEST_ALT 0.0
 #define APP_NTN_TEST_UNCERTAINTY_M 200
 
-ZBUS_MSG_SUBSCRIBER_DEFINE(app_fsm_sub); //Subscriber for app events
+/* This subscriber is the bridge from zbus events into the SMF thread. */
+ZBUS_MSG_SUBSCRIBER_DEFINE(app_fsm_sub);
 
 union app_sm_msg {
     struct app_event app_event;
@@ -124,8 +125,12 @@ static void apply_ntn_test_location(struct app_ctx *ctx)
 }
 #endif
 
-
-
+/*
+ * Zephyr SMF stores the hierarchy in the state table: RUNNING is the top
+ * parent, DISCONNECTED and CONNECTED are parents, and the indented states are
+ * the real work states. A child can return SMF_EVENT_PROPAGATE when the parent
+ * should handle a common event like modem loss.
+ */
 static const struct smf_state states[] = {
     [STATE_BOOT] = SMF_CREATE_STATE(
         boot_entry,
@@ -134,7 +139,6 @@ static const struct smf_state states[] = {
         NULL,
         NULL
     ),
-    /* parent state */
     [STATE_RUNNING] = SMF_CREATE_STATE(
         running_entry,
         running_run,
@@ -142,7 +146,6 @@ static const struct smf_state states[] = {
         NULL,
         &states[STATE_DISCONNECTED]
     ),
-    /* disconnected parent state */
     [STATE_DISCONNECTED] = SMF_CREATE_STATE(
         disconnected_entry,
         disconnected_run,
@@ -150,7 +153,6 @@ static const struct smf_state states[] = {
         &states[STATE_RUNNING],
         &states[STATE_LTEM_CONNECTING]
     ),
-        /* disconnected child states */
         [STATE_BACKOFF] = SMF_CREATE_STATE(
             backoff_entry,
             backoff_run,
@@ -172,7 +174,6 @@ static const struct smf_state states[] = {
             &states[STATE_DISCONNECTED],
             NULL
         ),
-    /* connecte parent state */
     [STATE_CONNECTED] = SMF_CREATE_STATE(
         connected_entry,
         connected_run,
@@ -180,7 +181,6 @@ static const struct smf_state states[] = {
         &states[STATE_RUNNING],
         &states[STATE_LTEM_CONNECTED]
     ),
-        /* connected child states */
         [STATE_LTEM_CONNECTED] = SMF_CREATE_STATE(
             ltem_connected_entry,
             ltem_connected_run,
@@ -256,6 +256,7 @@ static uint8_t retry_inc(struct app_ctx *ctx, enum rat rat)
 static void transition_to_state(struct app_ctx *ctx, enum app_state next_state)
 {
 #if defined(CONFIG_APP_FIELD_LOG)
+    /* Log the transition before ctx->state is updated, so from/to is correct. */
     field_log_note_state_change(ctx->state, next_state, ctx->ev.type, ctx);
 #endif
     ctx->state = next_state;
@@ -331,7 +332,7 @@ static void boot_entry(void *obj)
     }
 
 
-    /* init timers */
+    /* Timers post events back to zbus so state changes still happen in SMF. */
     k_timer_init(&ctx->backoff_timer, backoff_timer_handler, NULL);
     k_timer_init(&ctx->ntn_timer, ntn_timer_handler, NULL);
     k_timer_init(&ctx->ntn_connect_timer, ntn_connect_timer_handler, NULL);
@@ -339,7 +340,7 @@ static void boot_entry(void *obj)
     k_timer_init(&ctx->handoff_timer, handoff_timer_handler, NULL);
     
 
-    /* gnss timerout */
+    /* GNSS timeout settings are set by the state that starts GNSS. */
     ctx->gnss_goal = GNSS_GOAL_NONE; 
     ctx->gnss_timeout_sec = 0; 
     ctx->gnss_extend_once = false; 
@@ -388,7 +389,6 @@ static void running_exit(void *obj)
     LOG_WRN("EXIT: STATE_RUNNING");
 }
 
-/* disconnected parent state*/
 static void disconnected_entry(void *obj)
 {
     struct app_ctx *ctx = obj;
@@ -400,7 +400,9 @@ static void disconnected_entry(void *obj)
     ctx->cloud_connected = false;
 
     /*
-     * make sure to dont force modem disconnect here unless every child expects it
+     * DISCONNECTED is a parent for both backoff and connect attempts. It clears
+     * shared flags but does not force the modem offline, because each child
+     * state has a different modem setup path.
      */
 }
 
@@ -429,7 +431,6 @@ static void disconnected_exit(void *obj)
 }
 
 
-/* connected parent state */
 static void connected_entry(void *obj)
 {
     struct app_ctx *ctx = obj;
@@ -437,7 +438,8 @@ static void connected_entry(void *obj)
     LOG_WRN("ENTER: STATE_CONNECTED");
 
     /*
-     * child states decide RAT_LTEM vs RAT_NTN
+     * CONNECTED handles failures that are common to LTE-M and NTN. The child
+     * state still decides which RAT-specific services are running.
      */
 }
 
@@ -463,6 +465,10 @@ static enum smf_state_result connected_run(void *obj)
 
     case EVT_PDN_DOWN:
     case EVT_REG_FAIL:
+        /*
+         * LTE and NTN callbacks can overlap during handoff. source_rat lets us
+         * drop events that belong to the RAT we have already left.
+         */
         LOG_WRN("CONNECTED: net event=%s source=%s active=%s next=%s state=%d",
                 app_evt_name(ctx->ev.type),
                 rat_name(ctx->ev.source_rat),
@@ -638,7 +644,10 @@ static void ltem_connected_entry(void *obj)
                   K_NO_WAIT);
 #endif
     
-    // debug
+    /*
+     * Debug stops are kept behind Kconfig flags so field tests can pause after
+     * cloud, LTE location, or GNSS without changing the state flow.
+     */
     if (IS_ENABLED(CONFIG_APP_DEBUG_CLOUD_CONNECTING) && 
         ctx->last_done == STEP_CLOUD_DONE){
             LOG_INF("DEBUG: Halting after cloud conenct");
@@ -665,7 +674,10 @@ static void ltem_connected_entry(void *obj)
     return;
 #endif
 
-    // orchestration logic 
+    /*
+     * LTE-M connected is also where the optional cloud/location/GNSS chain is
+     * kicked off. last_done avoids restarting a step that just completed.
+     */
     if (!ctx->cloud_connected){
         struct app_event ev = {
             .type = EVT_START_CLOUD
@@ -673,7 +685,6 @@ static void ltem_connected_entry(void *obj)
 
         LOG_INF("LTEM_CONNECTED: requesting cloud connect");
         int pub_err = app_event_put(&ev, K_NO_WAIT);
-        //LOG_INF("app_event_put(EVT_START_LTE_LOC) -> %d", pub_err); 
         return;
     }
 
@@ -698,7 +709,6 @@ static void ltem_connected_entry(void *obj)
         };
         LOG_INF("LTEM_CONNECTED: requesting GNSS acquire");
         int pub_err = app_event_put(&ev, K_NO_WAIT);
-        //LOG_INF("app_event_put(EVT_START_LTE_LOC) -> %d", pub_err);
         return; 
     }
 }
@@ -710,6 +720,10 @@ static enum smf_state_result ltem_connected_run(void *obj)
     switch (ctx->ev.type) {
 
     case EVT_LTE_POOR:
+        /*
+         * NTN attach needs a location. If LTE is poor but the last GNSS fix is
+         * missing or old, get a fresh fix before tearing LTE down.
+         */
         LOG_WRN("LTE poor, consider switching RAT");
         ctx->next_rat = RAT_NTN;
 
@@ -746,7 +760,7 @@ static enum smf_state_result ltem_connected_run(void *obj)
 
         if (lte_service_is_connected()) {
             
-            /* try disconnecting all services before NTN */
+            /* NTN setup starts from a clean LTE/cloud/location state. */
             int err = location_service_stop();
             if (err) {
                 LOG_ERR("Failed to stop location service: err=%d", err);
@@ -763,7 +777,6 @@ static enum smf_state_result ltem_connected_run(void *obj)
             }
         }
 
-        /* go to backoff */
         LOG_WRN("TRANSITION: STATE_LTEM_CONNECTED -> STATE_BACKOFF");
         transition_to_state(ctx, STATE_BACKOFF);
         return SMF_EVENT_HANDLED;
@@ -783,7 +796,6 @@ static enum smf_state_result ltem_connected_run(void *obj)
         transition_to_state(ctx, STATE_GNSS_ACQUIRE);
         return SMF_EVENT_HANDLED; 
         
-/* force EVT_LTE_POOR (usually should be disabled) */
 #if defined(CONFIG_APP_CORE_SM_PROBE_TEST)
     case EVT_TIMEOUT:
     LOG_WRN("EVT_TIMEOUT in STATE_LTEM_CONNECTED active=%s next=%s",
@@ -796,8 +808,7 @@ static enum smf_state_result ltem_connected_run(void *obj)
 #endif
 
     default:
-        /* send unkown events to parent state */
-        //LOG_INF("unkown event arrived should propagate to parent node");
+        /* Parent CONNECTED handles shared events like lost PDN or stale RAT callbacks. */
         return SMF_EVENT_PROPAGATE;
     }
 }
@@ -868,8 +879,10 @@ static enum smf_state_result cloud_connecting_run(void *obj)
 
             LOG_WRN("Cloud disconnected while connecting");
             LOG_WRN("TRANSITION: STATE_CLOUD -> STATE_BACKOFF");
-            /* not sure if this backoff needs to handle this hmm */
-            //transition_to_state(ctx, STATE_BACKOFF);
+            /*
+             * A cloud disconnect does not always mean LTE-M is lost, so return
+             * to LTE-M connected instead of forcing a RAT fallback.
+             */
             transition_to_state(ctx, STATE_LTEM_CONNECTED);
             return SMF_EVENT_HANDLED;
 
@@ -1135,7 +1148,7 @@ static enum smf_state_result ntn_connecting_run(void *obj)
         }
         LOG_INF("ntn registered ok");
 
-        /* connection success -> reset retry attempt-counter */
+        /* Successful NTN attach resets the retry counter for the next fallback. */
         retry_reset(ctx, RAT_NTN);
         
         ctx->active_rat = RAT_NTN;
@@ -1189,7 +1202,7 @@ static enum smf_state_result ntn_connecting_run(void *obj)
 
         (void)ntn_service_stop();
 
-        /* increment NTN connect attempts */
+        /* After enough NTN failures, try LTE-M again instead of looping NTN forever. */
         uint8_t attempts = retry_inc(ctx, RAT_NTN);
 
         if (attempts >= CONFIG_APP_MAX_NTN_RETRIES) {
@@ -1247,13 +1260,14 @@ static void ntn_connected_entry(void *obj)
 
     (void)rsrp_service_start_ntn_monitor();
 
-/* force lte probe check after 5s for test change to 50 or something later */
-//#if defined(CONFIG_APP_CORE_SM_PROBE_TEST)
+    /*
+     * NTN is treated as the safe fallback, but the prototype still checks TN
+     * once after a delay so it can return to LTE-M when coverage is back.
+     */
     LOG_INF("Starting ntn probe timer: %d sec", APP_NTN_LTE_PROBE_DELAY_SEC);
     k_timer_start(&ctx->ntn_timer,
                   K_SECONDS(APP_NTN_LTE_PROBE_DELAY_SEC),
                   K_NO_WAIT);
-//#endif
 
     LOG_INF("(%s) finished entering ntn connected", __func__);
 }
@@ -1376,7 +1390,7 @@ static enum smf_state_result lte_probe_run(void *obj)
     case EVT_LTE_GOOD:
         LOG_INF("LTE probe: TN good -> UDP test");
         
-        /* send udp test */
+        /* RSRP alone is not enough; the UDP send checks that the TN context works. */
         err = modem_service_udp_send_test();
         
         if (err) {
@@ -1428,7 +1442,7 @@ static enum smf_state_result lte_probe_run(void *obj)
             return SMF_EVENT_HANDLED;
         }
 
-        /* start rsrp probe with n attempts */
+        /* Take a few RSRP samples before deciding if LTE-M is really back. */
         err = rsrp_service_start_probe(3);
         if (err < 0) {
             LOG_ERR("rsrp_service_start_probe failed: %d", err);
@@ -1482,7 +1496,7 @@ static void backoff_timer_handler(struct k_timer *timer)
 
 void app_start_backoff_timer(struct app_ctx *ctx)
 {
-    int32_t delay_ms = 3000; // test: 3 sek
+    int32_t delay_ms = 3000; /* Short prototype backoff between RAT attempts. */
 
     LOG_INF("Starting backoff timer: %d ms", delay_ms);
 
@@ -1578,7 +1592,10 @@ static void handoff_timer_handler(struct k_timer *timer)
     (void)app_event_put(&ev, K_NO_WAIT);
 }
 
-/* main smf thread setup */
+/*
+ * The app state machine runs as one thread that blocks on zbus. This is why
+ * service callbacks only publish events instead of calling SMF directly.
+ */
 #define SMF_STACK_SIZE 2048
 #define SMF_PRIORITY 5
 
@@ -1588,8 +1605,6 @@ static struct k_thread smf_thread_data;
 
 static void smf_thread(void *p1, void *p2, void *p3)
 {
-    //void app_sm_post_dispatch(struct app_ctx *ctx, const struct app_event *ev);
-
     ARG_UNUSED(p2);
     ARG_UNUSED(p3);
     struct app_ctx *ctx = p1;
@@ -1609,7 +1624,6 @@ static void smf_thread(void *p1, void *p2, void *p3)
 
         if (chan == &app_evt_chan) {
             dispatch_app_event(ctx, &msg.app_event);
-            //app_sm_post_dispatch(ctx, &msg.app_event);
             continue;
         }
 

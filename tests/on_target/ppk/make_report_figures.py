@@ -820,7 +820,7 @@ def plot_fallback_decision_rsrp(
 
     plotted_points = 0
 
-    # LTE-M RSRP in dBm
+    # LTE-M connection-evaluation rows already store RSRP in dBm.
     lte_t, lte_rsrp = extract_series(conneval_df, conneval_t_col, "rsrp_dbm")
 
     # NTN monitor RSRP is reported as modem RSRP index.
@@ -882,7 +882,7 @@ def plot_fallback_decision_rsrp(
             zorder=2,
         )
 
-        # lower threshold
+        # Lower reference line for very weak LTE-M samples.
         ax.axhline(
             -120,
             linestyle="--",
@@ -914,8 +914,6 @@ def plot_fallback_decision_rsrp(
                 linewidth=1.0,
                 zorder=1,
             )
-        #add_marker_lines(ax, focused_markers)
-
         ax.set_xlabel("Time [s]")
         ax.set_ylabel("RSRP [dBm]")
         ax.set_title("Fallback decision from LTE-M degradation to NTN operation")
@@ -1048,7 +1046,7 @@ def main() -> int:
     markers = build_markers(markers_df, markers_t_col, important_only=True)
     markers = dedupe_markers(markers, start_s, end_s, window_s=2.0)
 
-    # Prepare current time series
+    # Current samples are stored separately from UART events, so build this series here.
     current_t = np.array([])
     current_samples = np.array([])
     current_points = 0

@@ -31,6 +31,7 @@ LOG_MODULE_REGISTER(batt, LOG_LEVEL_INF);
 #define BATT_STATUS_CC_MASK       BIT(3)
 #define BATT_STATUS_CV_MASK       BIT(4)
 
+/* Thingy:91 X has this charger sensor; the DK build should skip it cleanly. */
 #if DT_HAS_COMPAT_STATUS_OKAY(nordic_npm1300_charger)
 #define BATT_NODE DT_COMPAT_GET_ANY_STATUS_OKAY(nordic_npm1300_charger)
 static const struct device *const batt_dev = DEVICE_DT_GET(BATT_NODE);
@@ -188,7 +189,6 @@ static void batt_thread(void *arg1, void *arg2, void *arg3)
 			LOG_WRN("Battery read failed: %d", ret);
 		} else {
 			batt_publish_sample(&sample);
-			//batt_log_sample(&sample);
 		}
 
 		k_sleep(K_SECONDS(BATT_POLL_INTERVAL_SEC));

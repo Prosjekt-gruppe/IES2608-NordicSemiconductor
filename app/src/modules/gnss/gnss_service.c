@@ -28,7 +28,7 @@ LOG_MODULE_REGISTER(gnss_service, LOG_LEVEL_INF);
 #define GNSS_AGNSS_PREP_TIMEOUT_SEC 10
 #define GNSS_AGNSS_PREP_RETRY_SEC 1
 
-/* internal state */
+/* GNSS callbacks run outside the app state machine, so work items do the real handling. */
 static struct k_work gnss_pvt_work;
 static struct k_work_delayable gnss_timeout_work;
 static struct k_work_delayable agnss_request_work;
@@ -43,13 +43,17 @@ static int64_t agnss_prepare_start_time;
 static bool first_fix;
 static bool gnss_initialized;
 static bool gnss_running;
+
+/*
+ * Assisted GNSS has two phases in this app: first wait for the modem's request,
+ * then wait for nRF Cloud to return and inject the assistance data.
+ */
 static bool assisted_start_in_progress;
 static bool agnss_ready;
 static bool agnss_request_sent;
 static bool agnss_pending_timeout_extended;
 static bool fix_published;
 
-/* forward declarations */
 static int publish_timeout(void);
 static int publish_fix(const struct nrf_modem_gnss_pvt_data_frame *pvt, int64_t ttff_ms);
 static int publish_error(int err);
@@ -70,8 +74,6 @@ static int gnss_start_search(void);
 static void gnss_mark_agnss_ready(const char *source);
 static void gnss_fallback_to_standalone(const char *reason, int err);
 static bool agnss_prep_timed_out(void);
-
-/* app event + zbus publish */
 
 static int publish_timeout(void)
 {
@@ -138,7 +140,7 @@ static int handle_error(int err)
 {
     LOG_ERR("GNSS service error, err=%d", err);
     (void)publish_error(err);
-    /* instead of sending error status double */
+    /* The state machine currently treats GNSS errors the same as a timeout. */
     (void)publish_timeout();
     return err;
 }
@@ -174,8 +176,6 @@ static bool agnss_prep_timed_out(void)
     return elapsed_ms >= (int64_t)GNSS_AGNSS_PREP_TIMEOUT_SEC * MSEC_PER_SEC;
 }
 
-/* helpers */
-
 static uint8_t count_tracked_satellites(const struct nrf_modem_gnss_pvt_data_frame *pvt)
 {
     uint8_t count = 0U;
@@ -196,8 +196,6 @@ static void log_fix_data(const struct nrf_modem_gnss_pvt_data_frame *pvt)
     LOG_INF("Altitude: %.01f m", (double)pvt->altitude);
     LOG_INF("Accuracy: %.01f m", (double)pvt->accuracy);
 }
-
-/* timeout handling */
 
 static void gnss_timeout_work_handler(struct k_work *work)
 {
@@ -264,7 +262,6 @@ static void gnss_pvt_work_handler(struct k_work *work)
 }
 
 
-/* GNSS modem events */
 static void gnss_event_handler(int event)
 {
     int err;
@@ -301,7 +298,6 @@ static void gnss_event_handler(int event)
     }
 }
 
-/* public init */
 int gnss_service_init(void)
 {
     int err;
@@ -343,8 +339,6 @@ int gnss_service_init(void)
     return 0;
 }
 
-/* raw GNSS start helper */
-
 static int gnss_start_search(void)
 {
     int err = nrf_modem_gnss_start();
@@ -361,8 +355,6 @@ static int gnss_start_search(void)
     LOG_INF("GNSS started");
     return 0;
 }
-
-/* A-GNSS preparation */
 
 static int gnss_prepare_agnss(void)
 {
@@ -402,8 +394,6 @@ static int gnss_prepare_agnss(void)
     return 0;
 }
 
-/* public assisted start API */
-
 int gnss_service_start_assisted(int32_t timeout_sec)
 {
     fix_published = false;
@@ -431,20 +421,19 @@ int gnss_service_start_assisted(int32_t timeout_sec)
 
     LOG_INF("Starting GNSS in assisted mode (awaiting A-GNSS request)");
 
-    /* Start GNSS first to trigger AGNSS request */
-
+    /*
+     * Nordic's modem tells us which assistance data it needs only after GNSS
+     * has started, so assisted mode begins with a normal GNSS start.
+     */
     err = gnss_start_search();
     if (err) {
         return handle_error(err);
     }
 
-    /* Start timeout */
     k_work_reschedule(&gnss_timeout_work, K_SECONDS(timeout_sec));
 
     return 0;
 }
-
-/* work item */
 
 static void agnss_request_work_handler(struct k_work *work)
 {

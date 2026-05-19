@@ -25,6 +25,7 @@ LOG_MODULE_REGISTER(temp, LOG_LEVEL_INF);
 #define TEMP_THREAD_PRIORITY   7
 #define TEMP_POLL_INTERVAL_SEC 15
 
+/* The BME680 is board-specific, so devicetree decides if this module can run. */
 #if DT_HAS_COMPAT_STATUS_OKAY(bosch_bme680)
 #define TEMP_NODE DT_COMPAT_GET_ANY_STATUS_OKAY(bosch_bme680)
 static const struct device *const temp_dev = DEVICE_DT_GET(TEMP_NODE);
@@ -117,7 +118,6 @@ static void temp_thread(void *arg1, void *arg2, void *arg3)
 			LOG_WRN("Temperature read failed: %d", ret);
 		} else {
 			temp_publish_sample(&sample);
-			//temp_log_sample(&sample);
 		}
 
 		k_sleep(K_SECONDS(TEMP_POLL_INTERVAL_SEC));

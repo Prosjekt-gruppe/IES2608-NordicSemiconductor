@@ -123,7 +123,10 @@ int cloud_service_init(void)
     init_param.event_handler = cloud_event_handler; 
 
 
-    //Initialize your cloud library here
+    /*
+     * nRF Cloud uses the same callback for connection state and incoming
+     * A-GNSS data, so the handler also notifies GNSS when assistance is ready.
+     */
     err = nrf_cloud_init(&init_param);
     if (err){
         LOG_ERR("nrf_cloud_init failed %d", err);

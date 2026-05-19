@@ -46,7 +46,6 @@ def main() -> None:
     for col in numeric_columns:
         df[col] = pd.to_numeric(df[col], errors="coerce")
 
-    # Basic sanity checks
     if df["t_sample_s"].notna().sum() == 0:
         raise ValueError("No valid timestamps found in t_sample_s")
 
@@ -59,10 +58,8 @@ def main() -> None:
     print("\nFirst rows:")
     print(df[["t_sample_s", "x", "y", "z", "accel", "delta", "speed", "motion_state"]].head(10))
 
-    # Clean rows useful for plotting
     plot_df = df.dropna(subset=["t_sample_s"]).sort_values("t_sample_s")
 
-    # Plot speed if available
     if plot_df["speed"].notna().any():
         plt.figure()
         plt.plot(plot_df["t_sample_s"], plot_df["speed"], marker="o", linewidth=1)
@@ -72,7 +69,6 @@ def main() -> None:
         plt.tight_layout()
         plt.show()
 
-    # Plot acceleration if available
     if plot_df["accel"].notna().any():
         plt.figure()
         plt.plot(plot_df["t_sample_s"], plot_df["accel"], marker="o", linewidth=1)
