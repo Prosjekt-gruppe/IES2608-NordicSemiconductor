@@ -7,12 +7,15 @@
 #include "rsrp_service.h"
 #include "app_events.h"
 
+#if defined(CONFIG_APP_FIELD_LOG)
+#include "field_log.h"
+#endif
+
 #include <errno.h>
 #include <iso646.h>
 #include <stdint.h>
-#include <stdio.h>
 
-#include <nrf_modem_at.h>
+#include <modem/lte_lc.h>
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
 
@@ -224,6 +227,36 @@ static bool rsrp_unavailable_limit_reached(void)
 	return unavailable_sample_count >= CONFIG_APP_MODEM_RSRP_LOSS_SAMPLE_COUNT;
 }
 
+static int rsrp_service_conn_eval_get(struct lte_lc_conn_eval_params *params)
+{
+	int err;
+
+	if (params == NULL) {
+		return -EINVAL;
+	}
+
+	err = lte_lc_conn_eval_params_get(params);
+	if (err) {
+		LOG_WRN("conn eval get failed: %d", err);
+		return err;
+	}
+
+	LOG_INF("conn eval: rrc=%d energy=%d ce=%d",
+		params->rrc_state, params->energy_estimate, params->ce_level);
+	LOG_INF("conn eval: rsrp=%d rsrq=%d snr=%d dl_pl=%d tx_pwr=%d tx_rep=%d rx_rep=%d",
+		params->rsrp, params->rsrq, params->snr, params->dl_pathloss,
+		params->tx_power, params->tx_rep, params->rx_rep);
+	LOG_INF("conn eval: earfcn=%d band=%d phy_cid=%d cell_id=%u mcc=%d mnc=%d",
+		params->earfcn, params->band, params->phy_cid, params->cell_id,
+		params->mcc, params->mnc);
+
+#if defined(CONFIG_APP_FIELD_LOG) && defined(CONFIG_APP_FIELD_LOG_CONN_EVAL)
+	field_log_note_conn_eval(params);
+#endif
+
+	return 0;
+}
+
 static void rsrp_work_handler(struct k_work *work)
 {
 	int err;
@@ -340,48 +373,30 @@ static void rsrp_work_handler(struct k_work *work)
 
 int rsrp_service_get(int *rsrp_dbm)
 {
-	char response[64];
-	int rxlev;
-	int ber;
-	int rscp;
-	int ecno;
-	int rsrq;
-	int rsrp_raw;
-	int parsed;
+	struct lte_lc_conn_eval_params params = {0};
 	int err;
 
 	if (rsrp_dbm == NULL) {
 		return -EINVAL;
 	}
 
-	err = nrf_modem_at_cmd(response, sizeof(response), "AT+CESQ");
+	err = rsrp_service_conn_eval_get(&params);
 	if (err) {
-		LOG_ERR("AT+CESQ failed: %d", err);
 		return err;
 	}
 
-	LOG_DBG("CESQ response: %s", response);
-	// change to event based architecture (see lte_lc-lib?)	
-	// coneval supprted in link controller api	
-	parsed = sscanf(response, "+CESQ: %d,%d,%d,%d,%d,%d",	
-			&rxlev, &ber, &rscp, &ecno, &rsrq, &rsrp_raw);
-	if (parsed != 6) {
-		LOG_WRN("Failed to parse CESQ response");
-		return -EIO;
-	}
-
-	if (rsrp_raw == 255) {
+	if (params.rsrp == LTE_LC_CELL_RSRP_INVALID) {
 		LOG_WRN("RSRP not known");
 		return -ENOENT;
 	}
 
-	if (rsrp_raw == 0) {
+	if (params.rsrp == 0) {
 		LOG_WRN("RSRP < -140 dBm");
 		*rsrp_dbm = -141;
 		return 0;
 	}
 
-	*rsrp_dbm = rsrp_raw - 141;
+	*rsrp_dbm = params.rsrp - 141;
 
 	return 0;
 }
@@ -423,6 +438,12 @@ int rsrp_service_start_monitor(void)
 		return -EINVAL;
 	}
 
+	if (current_mode == RSRP_MODE_MONITOR) {
+		LOG_INF("LTE-M RSRP monitor already running");
+		monitor_poll_interval_sec = rsrp_target_poll_interval_sec();
+		return k_work_reschedule(&rsrp_work, K_SECONDS(monitor_poll_interval_sec));
+	}
+
 	current_mode = RSRP_MODE_MONITOR;
 	reset_signal_tracking();
 	monitor_poll_interval_sec = rsrp_target_poll_interval_sec();
@@ -450,6 +471,13 @@ int rsrp_service_start_probe(uint8_t samples)
 
 int rsrp_service_stop(void)
 {
+	if (current_mode == RSRP_MODE_IDLE) {
+		LOG_INF("LTE-M RSRP monitor already stopped");
+		// redundant?
+		//reset_signal_tracking();
+		return 0;
+	}
+
 	current_mode = RSRP_MODE_IDLE;
 	reset_signal_tracking();
 	return k_work_cancel_delayable(&rsrp_work);
@@ -476,13 +504,12 @@ void rsrp_service_set_motion_hint(bool moving, uint32_t speed_mm_s,
 
 	monitor_poll_interval_sec = next_interval_sec;
 
-	LOG_INF("RSRP poll interval %u s (%s, speed=%u mm/s, accel=%u mg)",
-		monitor_poll_interval_sec,
-		moving ? "moving" : "still",
-		motion_speed_mm_s,
-		motion_linear_accel_mg);
-
 	if (service_initialized and (current_mode == RSRP_MODE_MONITOR)) {
+		LOG_INF("RSRP poll interval %u s (%s, speed=%u mm/s, accel=%u mg)",
+			monitor_poll_interval_sec,
+			moving ? "moving" : "still",
+			motion_speed_mm_s,
+			motion_linear_accel_mg);
 		(void)k_work_reschedule(&rsrp_work, K_SECONDS(monitor_poll_interval_sec));
 	}
 }

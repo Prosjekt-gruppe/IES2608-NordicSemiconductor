@@ -9,6 +9,8 @@
 #include "app_types.h"
 #include "app_zbus.h"
 
+#include <modem/lte_lc.h>
+
 enum field_log_location_source {
 	FIELD_LOG_LOCATION_NONE = 0,
 	FIELD_LOG_LOCATION_LTE,
@@ -27,3 +29,4 @@ void field_log_note_state_change(enum app_state from_state,
 				 enum app_state to_state,
 				 enum app_evt_type reason,
 				 const struct app_ctx *ctx);
+void field_log_note_conn_eval(const struct lte_lc_conn_eval_params *params);

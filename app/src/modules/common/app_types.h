@@ -7,6 +7,7 @@
 #pragma once
 
 #include <stdbool.h>
+#include <stdint.h>
 #include <nrf_modem_gnss.h>
 #include <zephyr/smf.h>
 
@@ -116,6 +117,7 @@ struct app_ctx {
 
     /* gnss */
     bool have_fix;
+    int64_t last_fix_uptime_ms;
     struct nrf_modem_gnss_pvt_data_frame last_pvt;
     enum gnss_goal gnss_goal; 
     int32_t gnss_timeout_sec; 
@@ -138,6 +140,7 @@ struct app_ctx {
     /* timers */
     struct k_timer backoff_timer;
     struct k_timer ntn_timer;
+    struct k_timer ntn_connect_timer;
     struct k_timer lte_timer;
 
     struct k_timer handoff_timer;

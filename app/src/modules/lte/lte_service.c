@@ -9,15 +9,37 @@
  #include "lte_service.h"
  #include "app_events.h"
 
- #include <modem/lte_lc.h>
- #include <zephyr/kernel.h>
- #include <zephyr/logging/log.h>
+#include <modem/lte_lc.h>
+#include <nrf_modem_at.h>
+#include <zephyr/kernel.h>
+#include <zephyr/logging/log.h>
 
 
 LOG_MODULE_REGISTER(lte_service, LOG_LEVEL_INF);
 
 static bool lte_connected; 
 static bool probe_pending;
+
+static int lte_service_apply_bandlock(void)
+{
+    const char *cmd = CONFIG_APP_LTE_BANDLOCK_AT_CMD;
+
+    if (cmd[0] == '\0') {
+        LOG_INF("LTE bandlock: disabled");
+        return 0;
+    }
+
+    LOG_INF("LTE bandlock: %s", cmd);
+
+    int err = nrf_modem_at_printf("%s", cmd);
+    if (err) {
+        LOG_ERR("LTE bandlock AT failed: %d", err);
+        return err;
+    }
+
+    LOG_INF("LTE bandlock applied");
+    return 0;
+}
 
 static const char *lte_mode_name(enum lte_lc_lte_mode mode)
 {
@@ -103,6 +125,11 @@ int lte_service_init(void)
 {
     lte_connected = false;
     probe_pending = false;
+    if (CONFIG_APP_LTE_BANDLOCK_AT_CMD[0] == '\0') {
+        LOG_INF("LTE bandlock: disabled");
+    } else {
+        LOG_INF("LTE bandlock enabled");
+    }
     return 0; 
 }
 
@@ -122,6 +149,11 @@ int lte_service_connect_async(void)
     err = lte_lc_power_off();
     if (err) {
         LOG_ERR("LTE modem power-off before connect failed: %d", err);
+        return err;
+    }
+
+    err = lte_service_apply_bandlock();
+    if (err) {
         return err;
     }
 

@@ -154,7 +154,12 @@ static void ntn_lc_evt_handler(const struct lte_lc_evt *const evt)
 {    
     switch (evt->type) {
     case LTE_LC_EVT_NW_REG_STATUS:
-        LOG_INF("NTN NW registration status: %d", evt->nw_reg_status);
+        if (active_ctx != NULL) {
+            LOG_INF("NTN NW registration status: %d (state=%d)",
+                    evt->nw_reg_status, active_ctx->state);
+        } else {
+            LOG_INF("NTN NW registration status: %d", evt->nw_reg_status);
+        }
 
         switch (evt->nw_reg_status) {
         case LTE_LC_NW_REG_REGISTERED_HOME:
@@ -170,8 +175,23 @@ static void ntn_lc_evt_handler(const struct lte_lc_evt *const evt)
             break;
 
         case LTE_LC_NW_REG_NOT_REGISTERED:
-        case LTE_LC_NW_REG_REGISTRATION_DENIED:
         case LTE_LC_NW_REG_UNKNOWN:
+            if (active_ctx != NULL && active_ctx->state == STATE_NTN_CONNECTING) {
+                LOG_WRN("NTN attach in progress: ignoring reg status=%d",
+                        evt->nw_reg_status);
+                break;
+            }
+            LOG_WRN("NTN registration failed/status=%d", evt->nw_reg_status);
+            {
+                struct app_event ev = {
+                    .type = EVT_REG_FAIL,
+                    .source_rat = RAT_NTN,
+                };
+                (void)app_event_put(&ev, K_NO_WAIT);
+            }
+            break;
+
+        case LTE_LC_NW_REG_REGISTRATION_DENIED:
         case LTE_LC_NW_REG_UICC_FAIL:
             LOG_WRN("NTN registration failed/status=%d", evt->nw_reg_status);
             {

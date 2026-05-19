@@ -54,4 +54,7 @@ build*/
 __pycache__/
 
 ntn_log.txt
-**/data/raw/
+**/twister-out/
+**/data/raw/*
+**/ppk/output/*
+**/scripts/data/*

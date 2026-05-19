@@ -104,7 +104,7 @@ rec_state = RecordingState(
 
 DATA_DIR = "data/raw"
 PPK2_PORT = "/dev/serial/by-id/usb-Nordic_Semiconductor_PPK2_CB6017A1DC4B-if01"
-UART_PORT = "/dev/serial/by-id/usb-Nordic_Semiconductor_Thingy:91_X_UART_THINGY91X_E50FC7F3734-if01"
+UART_PORT = "/dev/serial/by-id/usb-Nordic_Semiconductor_Thingy:91_X_UART_THINGY91X_135CE6BA227-if01"
 UART_BAUDRATE = 115200
 SOURCE_VOLTAGE_MV = 3300
 MEASUREMENT_MODE = "ampere"
@@ -136,6 +136,11 @@ def parse_args():
         type=int,
         default=UART_BAUDRATE,
         help="UART baudrate for DUT logs.",
+    )
+    parser.add_argument(
+        "--no-uart",
+        action="store_true",
+        help="Disable DUT UART logging.",
     )
     parser.add_argument(
         "--mode",
@@ -190,6 +195,79 @@ def parse_args():
         ),
     )
     return parser.parse_args()
+
+def dump_fieldlog(port: str, baudrate: int, data_dir: str) -> None:
+    path = os.path.join(data_dir, "fieldlog_dump.txt")
+
+    try:
+        with serial.Serial(port, baudrate=baudrate, timeout=0.5) as ser:
+            time.sleep(0.2)
+            ser.reset_input_buffer()
+
+            ser.write(b"fieldlog dump\n")
+            ser.flush()
+
+            deadline = time.time() + 20.0
+
+            with open(path, "w", encoding="utf-8") as f:
+                while time.time() < deadline:
+                    line = ser.readline()
+                    if not line:
+                        continue
+
+                    text = line.decode(errors="replace")
+                    f.write(text)
+
+                    if "# records=" in text:
+                        break
+
+        print(f"Fieldlog dumped to {path}")
+
+    except Exception as e:
+        print(f"Fieldlog dump failed: {e}")
+
+def erase_fieldlog(port: str, baudrate: int) -> bool:
+    try:
+        with serial.Serial(port, baudrate=baudrate, timeout=0.5) as ser:
+            time.sleep(1.0)
+            ser.reset_input_buffer()
+
+            ser.write(b"\n")
+            ser.flush()
+            time.sleep(0.2)
+            ser.reset_input_buffer()
+
+            ser.write(b"fieldlog erase\n")
+            ser.flush()
+
+            deadline = time.time() + 10.0
+            saw_success = False
+
+            while time.time() < deadline:
+                line = ser.readline()
+                if not line:
+                    continue
+
+                text = line.decode(errors="replace").strip()
+                print(f"[FIELDLOG ERASE] {text}")
+
+                if "field log erased" in text:
+                    saw_success = True
+                    break
+
+                if "error" in text.lower() or "failed" in text.lower():
+                    print("Fieldlog erase reported an error")
+                    return False
+
+            if not saw_success:
+                print("Fieldlog erase did not confirm success")
+                return False
+
+            return True
+
+    except Exception as e:
+        print(f"Fieldlog erase failed: {e}")
+        return False
 
 
 def open_output_files(data_dir: str, append: bool) -> int:
@@ -280,7 +358,7 @@ def ppk_worker(ppk2: PPK2_API) -> None:
                 window_samples.clear()
                 window_start = now
 
-            time.sleep(0.01)  # litt raskere enn før for bedre sampling
+            time.sleep(0.001)  # litt raskere enn før for bedre sampling
 
     finally:
         ppk2.stop_measuring()
@@ -342,11 +420,33 @@ def main() -> None:
         time.sleep(0.5)
 
     ppk_thread = threading.Thread(target=ppk_worker, args=(ppk2,))
-    uart_thread = threading.Thread(target=uart_worker, args=(args.uart_port, args.uart_baudrate))
+    uart_thread = None
+    if not args.no_uart:
+        uart_thread = threading.Thread(
+            target=uart_worker,
+            args=(args.uart_port, args.uart_baudrate),
+        )
 
     try:
-        # start uart logger
-        uart_thread.start()
+        if args.no_uart:
+            print("UART logging disabled (--no-uart)")
+            t_ns, sample_idx = rec_state.snapshot()
+            event_file.write(f"{t_ns},{sample_idx},system,UART_LOGGING_DISABLED\n")
+            event_file.flush()
+        else:
+            print("Temporary boot for fieldlog erase...")
+            ppk2.toggle_DUT_power("ON")
+            time.sleep(2.0)
+
+            ok = erase_fieldlog(args.uart_port, args.uart_baudrate)
+            if not ok:
+                print("WARNING: fieldlog erase was not confirmed")
+
+            print("Powering DUT off before real test run...")
+            ppk2.toggle_DUT_power("OFF")
+            time.sleep(1.0)
+
+            uart_thread.start()
         
         # start ppk logger
         ppk_thread.start()
@@ -365,10 +465,13 @@ def main() -> None:
             event_file.write(f"{t_ns},{sample_idx},system,AMPERE_MODE_PASS_THROUGH_ON\n")
         event_file.flush()
 
+        
+
         while True:
-            while not uart_queue.empty():
-                ts, msg = uart_queue.get()
-                print(f"[UART] {ts:.3f} {msg}")
+            if not args.no_uart:
+                while not uart_queue.empty():
+                    ts, msg = uart_queue.get()
+                    print(f"[UART] {ts:.3f} {msg}")
 
             time.sleep(0.05)
 
@@ -379,8 +482,10 @@ def main() -> None:
         stop_event.set()
         if ppk_thread.is_alive():
             ppk_thread.join()
-        if uart_thread.is_alive():
+        if uart_thread is not None and uart_thread.is_alive():
             uart_thread.join()
+        if not args.no_uart:
+            dump_fieldlog(args.uart_port, args.uart_baudrate, args.data_dir)
         if raw_file is not None:
             raw_file.close()
         if event_file is not None:
