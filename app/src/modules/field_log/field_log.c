@@ -51,17 +51,20 @@ LOG_MODULE_REGISTER(field_log, LOG_LEVEL_INF);
 	"location_source,latitude,longitude,accuracy_m,last_rsrp_dbm,"             \
 	"interval_s,power_interval_uwh,power_total_uwh,lte_losses_interval,"       \
 	"lte_losses_total,switchbacks_interval,switchbacks_total,flags,"           \
-	"dropped_messages"
+	"dropped_messages,rrc_state,ce_level,rsrp,rsrq,snr,dl_pathloss,"            \
+	"tx_power,tx_rep,rx_rep"
 
 enum field_log_record_type {
 	FIELD_LOG_RECORD_TYPE_STATE_CHANGE = 1,
 	FIELD_LOG_RECORD_TYPE_SUMMARY = 2,
+	FIELD_LOG_RECORD_TYPE_CONN_EVAL = 3,
 };
 
 enum field_log_message_type {
 	FIELD_LOG_MSG_BATTERY_SAMPLE = 1,
 	FIELD_LOG_MSG_LOCATION_UPDATE,
 	FIELD_LOG_MSG_STATE_CHANGE,
+	FIELD_LOG_MSG_CONN_EVAL,
 };
 
 enum field_log_slot_state {
@@ -103,11 +106,24 @@ struct field_log_summary_record_payload {
 	uint8_t dropped_messages;
 } __packed;
 
+struct field_log_conn_eval_record_payload {
+	int16_t rrc_state;
+	int16_t ce_level;
+	int16_t rsrp;
+	int16_t rsrq;
+	int16_t snr;
+	int16_t dl_pathloss;
+	int16_t tx_power;
+	int16_t tx_rep;
+	int16_t rx_rep;
+} __packed;
+
 struct field_log_record {
 	struct field_log_record_header header;
 	union {
 		struct field_log_state_record_payload state;
 		struct field_log_summary_record_payload summary;
+		struct field_log_conn_eval_record_payload conn_eval;
 	} payload;
 	uint16_t crc16;
 } __packed;
@@ -172,17 +188,32 @@ struct field_log_state_change_message {
 	int64_t timestamp_ms;
 };
 
+struct field_log_conn_eval_message {
+	int16_t rrc_state;
+	int16_t ce_level;
+	int16_t rsrp;
+	int16_t rsrq;
+	int16_t snr;
+	int16_t dl_pathloss;
+	int16_t tx_power;
+	int16_t tx_rep;
+	int16_t rx_rep;
+	int64_t timestamp_ms;
+};
+
 struct field_log_message {
 	enum field_log_message_type type;
 	union {
 		struct field_log_battery_message battery;
 		struct field_log_location_message location;
 		struct field_log_state_change_message state;
+		struct field_log_conn_eval_message conn_eval;
 	} data;
 };
 
 BUILD_ASSERT(sizeof(struct field_log_state_record_payload) == 18);
 BUILD_ASSERT(sizeof(struct field_log_summary_record_payload) == 18);
+BUILD_ASSERT(sizeof(struct field_log_conn_eval_record_payload) == 18);
 BUILD_ASSERT(sizeof(struct field_log_record) == FIELD_LOG_RECORD_SIZE);
 BUILD_ASSERT((CONFIG_APP_FIELD_LOG_ERASE_BLOCK_SIZE % FIELD_LOG_RECORD_SIZE) == 0);
 
@@ -232,7 +263,8 @@ static bool record_is_erased(const struct field_log_record *record)
 static bool record_type_is_valid(uint8_t type)
 {
 	return type == FIELD_LOG_RECORD_TYPE_STATE_CHANGE ||
-	       type == FIELD_LOG_RECORD_TYPE_SUMMARY;
+	       type == FIELD_LOG_RECORD_TYPE_SUMMARY ||
+	       type == FIELD_LOG_RECORD_TYPE_CONN_EVAL;
 }
 
 static bool record_is_valid(const struct field_log_record *record)
@@ -913,6 +945,46 @@ static void field_log_process_state_change(const struct field_log_state_change_m
 	field_log_append_current_record(&record, "state");
 }
 
+static void field_log_log_conn_eval_record(const struct field_log_record *record)
+{
+	const struct field_log_conn_eval_record_payload *payload =
+		&record->payload.conn_eval;
+
+	LOG_INF("Field log conneval #%u: rrc=%d ce=%d rsrp=%d rsrq=%d snr=%d dl_pl=%d tx_pwr=%d tx_rep=%d rx_rep=%d",
+		record->header.sequence,
+		payload->rrc_state,
+		payload->ce_level,
+		payload->rsrp,
+		payload->rsrq,
+		payload->snr,
+		payload->dl_pathloss,
+		payload->tx_power,
+		payload->tx_rep,
+		payload->rx_rep);
+}
+
+static void field_log_process_conn_eval(const struct field_log_conn_eval_message *sample)
+{
+	struct field_log_record record;
+
+	field_log_fill_record_header(&record, FIELD_LOG_RECORD_TYPE_CONN_EVAL,
+				     sample->timestamp_ms);
+	record.payload.conn_eval.rrc_state = sample->rrc_state;
+	record.payload.conn_eval.ce_level = sample->ce_level;
+	record.payload.conn_eval.rsrp = sample->rsrp;
+	record.payload.conn_eval.rsrq = sample->rsrq;
+	record.payload.conn_eval.snr = sample->snr;
+	record.payload.conn_eval.dl_pathloss = sample->dl_pathloss;
+	record.payload.conn_eval.tx_power = sample->tx_power;
+	record.payload.conn_eval.tx_rep = sample->tx_rep;
+	record.payload.conn_eval.rx_rep = sample->rx_rep;
+	record.crc16 = crc16_ccitt((const uint8_t *)&record,
+				   offsetof(struct field_log_record, crc16));
+
+	field_log_log_conn_eval_record(&record);
+	field_log_append_current_record(&record, "conneval");
+}
+
 static void field_log_log_summary_record(const struct field_log_record *record)
 {
 	const struct field_log_summary_record_payload *payload = &record->payload.summary;
@@ -1024,6 +1096,9 @@ static void field_log_thread(void *arg1, void *arg2, void *arg3)
 		case FIELD_LOG_MSG_STATE_CHANGE:
 			field_log_process_state_change(&message.data.state);
 			break;
+		case FIELD_LOG_MSG_CONN_EVAL:
+			field_log_process_conn_eval(&message.data.conn_eval);
+			break;
 		default:
 			LOG_WRN("Field log ignored unknown queue message: %d", message.type);
 			break;
@@ -1120,6 +1195,30 @@ void field_log_note_state_change(enum app_state from_state,
 	message.data.state.next_rat = ctx->next_rat;
 	message.data.state.last_rsrp_dbm = clamp_s16(ctx->rsrp_dbm);
 	message.data.state.timestamp_ms = k_uptime_get();
+
+	(void)field_log_enqueue_message(&message);
+}
+
+void field_log_note_conn_eval(const struct lte_lc_conn_eval_params *params)
+{
+	struct field_log_message message = {
+		.type = FIELD_LOG_MSG_CONN_EVAL,
+	};
+
+	if (params == NULL) {
+		return;
+	}
+
+	message.data.conn_eval.rrc_state = clamp_s16(params->rrc_state);
+	message.data.conn_eval.ce_level = clamp_s16(params->ce_level);
+	message.data.conn_eval.rsrp = clamp_s16(params->rsrp);
+	message.data.conn_eval.rsrq = clamp_s16(params->rsrq);
+	message.data.conn_eval.snr = clamp_s16(params->snr);
+	message.data.conn_eval.dl_pathloss = clamp_s16(params->dl_pathloss);
+	message.data.conn_eval.tx_power = clamp_s16(params->tx_power);
+	message.data.conn_eval.tx_rep = clamp_s16(params->tx_rep);
+	message.data.conn_eval.rx_rep = clamp_s16(params->rx_rep);
+	message.data.conn_eval.timestamp_ms = k_uptime_get();
 
 	(void)field_log_enqueue_message(&message);
 }
@@ -1240,7 +1339,9 @@ static void shell_print_state_record(const struct shell *shell,
 	}
 
 	shell_print(shell,
-		    "state,%u,%u,%s,%s,%s,%s,%s,%s,%s,%s,%s,%d,,,,,,,,,",
+		    "state,%u,%u,%s,%s,%s,%s,%s,%s,%s,%s,%s,%d"
+		    ",,,,,,,,,"
+		    ",,,,,,,,,",
 		    record->header.sequence,
 		    record->header.uptime_s,
 		    field_log_state_name(payload->from_state),
@@ -1261,7 +1362,7 @@ static void shell_print_summary_record(const struct shell *shell,
 	const struct field_log_summary_record_payload *payload = &record->payload.summary;
 
 	shell_print(shell,
-		    "summary,%u,%u,,,,,,,,,,,%u,%u,%u,%u,%u,%u,%u,0x%02x,%u",
+		    "summary,%u,%u,,,,,,,,,,,%u,%u,%u,%u,%u,%u,%u,0x%02x,%u,,,,,,,,,",
 		    record->header.sequence,
 		    record->header.uptime_s,
 		    payload->interval_s,
@@ -1273,6 +1374,31 @@ static void shell_print_summary_record(const struct shell *shell,
 		    payload->switchbacks_total,
 		    payload->flags,
 		    payload->dropped_messages);
+}
+
+static void shell_print_conn_eval_record(const struct shell *shell,
+					const struct field_log_record *record)
+{
+	const struct field_log_conn_eval_record_payload *payload =
+		&record->payload.conn_eval;
+
+	shell_print(shell,
+		    "conneval,%u,%u"
+		    ",,,,,,,,,"
+		    ",,,,,,,,,"
+		    ","
+		    "%d,%d,%d,%d,%d,%d,%d,%d,%d",
+		    record->header.sequence,
+		    record->header.uptime_s,
+		    payload->rrc_state,
+		    payload->ce_level,
+		    payload->rsrp,
+		    payload->rsrq,
+		    payload->snr,
+		    payload->dl_pathloss,
+		    payload->tx_power,
+		    payload->tx_rep,
+		    payload->rx_rep);
 }
 
 static int cmd_fieldlog_dump(const struct shell *shell, size_t argc, char **argv)
@@ -1314,10 +1440,25 @@ static int cmd_fieldlog_dump(const struct shell *shell, size_t argc, char **argv
 			break;
 		}
 
-		if (record.header.type == FIELD_LOG_RECORD_TYPE_STATE_CHANGE) {
+		switch (record.header.type) {
+		case FIELD_LOG_RECORD_TYPE_STATE_CHANGE:
 			shell_print_state_record(shell, &record);
-		} else {
+			break;
+		case FIELD_LOG_RECORD_TYPE_SUMMARY:
 			shell_print_summary_record(shell, &record);
+			break;
+		case FIELD_LOG_RECORD_TYPE_CONN_EVAL:
+			shell_print_conn_eval_record(shell, &record);
+			break;
+		default:
+			shell_error(shell, "unknown record type at 0x%lx",
+				    (long)offset);
+			err = -EBADMSG;
+			break;
+		}
+
+		if (err) {
+			break;
 		}
 
 		count++;

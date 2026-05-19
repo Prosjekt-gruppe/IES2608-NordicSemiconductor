@@ -15,13 +15,11 @@
 
 LOG_MODULE_REGISTER(app_zbus, LOG_LEVEL_INF);
 
-ZBUS_OBS_DECLARE(app_fsm_sub);
-
 ZBUS_CHAN_DEFINE(gnss_status_chan,
 		 struct app_gnss_status,
 		 NULL,
 		 NULL,
-		 ZBUS_OBSERVERS(app_fsm_sub),
+		 ZBUS_OBSERVERS_EMPTY,
 		 ZBUS_MSG_INIT(.state = APP_GNSS_STATE_IDLE,
 			       .err = 0,
 			       .time_to_first_fix_ms = -1,

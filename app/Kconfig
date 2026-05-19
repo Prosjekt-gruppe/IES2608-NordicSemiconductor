@@ -11,10 +11,18 @@ menu "LTEM-NTN Fallback Testbench"
 # state machine config (can be board specific)
 config APP_GNSS_TIMEOUT_SEC
     int "GNSS timeout in seconds"
-    default 10
+    default 120
     range 1 600
     help
-      Timeout for GNSS acquisition before continuing.
+      Timeout for GNSS acquisition before continuing. Assisted GNSS can still
+      need more than 30 seconds outdoors, especially after a cold start or when
+      the antenna view is marginal.
+
+config APP_FORCE_ASSISTED_GNSS_FOR_NTN
+    bool "Force assisted GNSS for NTN pre-acquire"
+    default n
+    help
+      Use assisted GNSS for NTN pre-acquire during field testing.
 
 config APP_MODEM_SIGNAL_POLL_INTERVAL_SEC
     int "LTE-M signal poll interval in seconds"
@@ -74,6 +82,13 @@ config APP_MODEM_RSRP_WEAK_SAMPLE_COUNT
       Number of consecutive valid RSRP samples at or below the fallback
       threshold needed before the modem service requests NTN fallback, even if
       the signal is not actively dropping anymore.
+
+config APP_LTE_BANDLOCK_AT_CMD
+    string "LTE bandlock AT command"
+    default ""
+    help
+      Optional AT command sent before LTE connect, e.g. AT%XBANDLOCK=...
+      Leave empty to disable bandlock.
 
 config APP_SENSOR_ACCEL_DEMO
     bool "Enable accelerometer demo"
@@ -164,6 +179,13 @@ config APP_FIELD_LOG_SHELL
       Enable the fieldlog shell command group with info, dump and erase
       commands over the serial shell.
 
+config APP_FIELD_LOG_CONN_EVAL
+    bool "Log LTE conn eval samples in field log"
+    default y
+    depends on APP_FIELD_LOG
+    help
+      Store LTE connection evaluation metrics as separate field log records.
+
 config APP_CORE_SEND_UDP_DATA
     bool "Send UDP data over NTN"
     help
@@ -179,6 +201,13 @@ config APP_MAX_NTN_RETRIES
     default 3
     help
       Set NTN retries.
+
+config APP_NTN_CONNECT_TIMEOUT_SEC
+    int "NTN attach timeout in seconds"
+    default 180
+    range 30 1800
+    help
+      Maximum time to wait for NTN attach/registration before retrying.
 
 config APP_MAX_LTEM_RETRIES
     int "Set maximum retry connection attempts for LTEM"

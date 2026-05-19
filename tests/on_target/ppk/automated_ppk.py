@@ -7,6 +7,7 @@ import os
 import queue
 import threading
 import time
+from argparse import ArgumentParser
 from dataclasses import dataclass, field
 from threading import Lock
 
@@ -74,8 +75,15 @@ class PatchedPPK2(PPK2_API):
 class RecordingState:
     t0_ns: int
     sample_rate_hz: int
+    base_sample_idx: int = 0
     total_samples_written: int = 0
     lock: Lock = field(default_factory=Lock)
+
+    def reset(self, base_sample_idx: int = 0):
+        with self.lock:
+            self.t0_ns = time.monotonic_ns()
+            self.base_sample_idx = base_sample_idx
+            self.total_samples_written = 0
 
     def mark_samples_written(self, n: int):
         with self.lock:
@@ -84,7 +92,7 @@ class RecordingState:
     def snapshot(self):
         with self.lock:
             t_ns = time.monotonic_ns() - self.t0_ns
-            sample_idx = self.total_samples_written
+            sample_idx = self.base_sample_idx + self.total_samples_written
         return t_ns, sample_idx
     
 
@@ -95,27 +103,196 @@ rec_state = RecordingState(
 
 
 DATA_DIR = "data/raw"
-os.makedirs(DATA_DIR, exist_ok=True)
-
-# setup log files
-raw_file = open(os.path.join(DATA_DIR, "current_uA.bin"), "ab")
-event_file = open(os.path.join(DATA_DIR, "ppk_events.csv"), "a")
-
-if event_file.tell() == 0:
-    event_file.write("t_ns,sample_idx,source,message\n")
-
-
 PPK2_PORT = "/dev/serial/by-id/usb-Nordic_Semiconductor_PPK2_CB6017A1DC4B-if01"
-UART_PORT = "/dev/serial/by-id/usb-SEGGER_J-Link_001052041270-if00"
+UART_PORT = "/dev/serial/by-id/usb-Nordic_Semiconductor_Thingy:91_X_UART_THINGY91X_135CE6BA227-if01"
 UART_BAUDRATE = 115200
 SOURCE_VOLTAGE_MV = 3300
+MEASUREMENT_MODE = "ampere"
+
+
+raw_file = None
+event_file = None
 
 
 uart_queue = queue.Queue()
 stop_event = threading.Event()
+measurement_started_event = threading.Event()
 
 
-def configure_ppk2(port: str) -> PPK2_API:
+def parse_args():
+    parser = ArgumentParser(description="Record PPK2 current and UART events.")
+    parser.add_argument(
+        "--ppk2-port",
+        default=PPK2_PORT,
+        help="Serial port for the PPK2.",
+    )
+    parser.add_argument(
+        "--uart-port",
+        default=UART_PORT,
+        help="Serial port for DUT UART logs.",
+    )
+    parser.add_argument(
+        "--uart-baudrate",
+        type=int,
+        default=UART_BAUDRATE,
+        help="UART baudrate for DUT logs.",
+    )
+    parser.add_argument(
+        "--no-uart",
+        action="store_true",
+        help="Disable DUT UART logging.",
+    )
+    parser.add_argument(
+        "--mode",
+        choices=("ampere", "source"),
+        default=MEASUREMENT_MODE,
+        help=(
+            "PPK2 measurement mode. Use 'ampere' when the PPK2 is inserted "
+            "in series with an already-powered rail. Use 'source' when the "
+            "PPK2 should power the DUT."
+        ),
+    )
+    parser.add_argument(
+        "--disable-output-switch",
+        action="store_true",
+        help=(
+            "Do not enable the PPK2 DUT output switch. In ampere mode this "
+            "normally must stay enabled because it closes the VIN-to-VOUT "
+            "measurement path."
+        ),
+    )
+    parser.add_argument(
+        "--no-power-cycle",
+        action="store_true",
+        help=(
+            "Leave the PPK2 DUT output switch in its current state before "
+            "recording. By default the script turns it off first, starts "
+            "recording, then turns it on so boot/state events align with "
+            "sample indices."
+        ),
+    )
+    parser.add_argument(
+        "--source-voltage-mv",
+        type=int,
+        default=SOURCE_VOLTAGE_MV,
+        help=(
+            "Voltage in mV used by PPK2 source mode. The ppk2-api also uses "
+            "this value for sample conversion in ampere mode."
+        ),
+    )
+    parser.add_argument(
+        "--data-dir",
+        default=DATA_DIR,
+        help="Directory for current_uA.bin and ppk_events.csv.",
+    )
+    parser.add_argument(
+        "--append",
+        action="store_true",
+        help=(
+            "Append to existing output files. By default a run overwrites old "
+            "PPK data so event sample indices start at the beginning of the "
+            "plotted capture."
+        ),
+    )
+    return parser.parse_args()
+
+def dump_fieldlog(port: str, baudrate: int, data_dir: str) -> None:
+    path = os.path.join(data_dir, "fieldlog_dump.txt")
+
+    try:
+        with serial.Serial(port, baudrate=baudrate, timeout=0.5) as ser:
+            time.sleep(0.2)
+            ser.reset_input_buffer()
+
+            ser.write(b"fieldlog dump\n")
+            ser.flush()
+
+            deadline = time.time() + 20.0
+
+            with open(path, "w", encoding="utf-8") as f:
+                while time.time() < deadline:
+                    line = ser.readline()
+                    if not line:
+                        continue
+
+                    text = line.decode(errors="replace")
+                    f.write(text)
+
+                    if "# records=" in text:
+                        break
+
+        print(f"Fieldlog dumped to {path}")
+
+    except Exception as e:
+        print(f"Fieldlog dump failed: {e}")
+
+def erase_fieldlog(port: str, baudrate: int) -> bool:
+    try:
+        with serial.Serial(port, baudrate=baudrate, timeout=0.5) as ser:
+            time.sleep(1.0)
+            ser.reset_input_buffer()
+
+            ser.write(b"\n")
+            ser.flush()
+            time.sleep(0.2)
+            ser.reset_input_buffer()
+
+            ser.write(b"fieldlog erase\n")
+            ser.flush()
+
+            deadline = time.time() + 10.0
+            saw_success = False
+
+            while time.time() < deadline:
+                line = ser.readline()
+                if not line:
+                    continue
+
+                text = line.decode(errors="replace").strip()
+                print(f"[FIELDLOG ERASE] {text}")
+
+                if "field log erased" in text:
+                    saw_success = True
+                    break
+
+                if "error" in text.lower() or "failed" in text.lower():
+                    print("Fieldlog erase reported an error")
+                    return False
+
+            if not saw_success:
+                print("Fieldlog erase did not confirm success")
+                return False
+
+            return True
+
+    except Exception as e:
+        print(f"Fieldlog erase failed: {e}")
+        return False
+
+
+def open_output_files(data_dir: str, append: bool) -> int:
+    global raw_file, event_file
+
+    os.makedirs(data_dir, exist_ok=True)
+
+    raw_path = os.path.join(data_dir, "current_uA.bin")
+    event_path = os.path.join(data_dir, "ppk_events.csv")
+    base_sample_idx = 0
+
+    if append and os.path.exists(raw_path):
+        base_sample_idx = os.path.getsize(raw_path) // np.dtype(np.float32).itemsize
+
+    raw_file = open(raw_path, "ab" if append else "wb")
+    event_file = open(event_path, "a" if append else "w", newline="")
+
+    if (not append) or event_file.tell() == 0:
+        event_file.write("t_ns,sample_idx,source,message\n")
+        event_file.flush()
+
+    return base_sample_idx
+
+
+def configure_ppk2(port: str, mode: str, source_voltage_mv: int) -> PPK2_API:
     print("Using patched ppk2")
     ppk2 = PatchedPPK2(port)
 
@@ -124,16 +301,22 @@ def configure_ppk2(port: str) -> PPK2_API:
     ppk2.ser.reset_output_buffer()
     time.sleep(0.1)
 
-    ppk2.get_modifiers()
-    ppk2.use_source_meter()
-    ppk2.set_source_voltage(SOURCE_VOLTAGE_MV)
-    #ppk2.toggle_DUT_power("ON")
+    if not ppk2.get_modifiers():
+        raise RuntimeError("Failed to read PPK2 calibration metadata")
+
+    ppk2.set_source_voltage(source_voltage_mv)
+
+    if mode == "source":
+        ppk2.use_source_meter()
+    else:
+        ppk2.use_ampere_meter()
 
     return ppk2
 
 
 def ppk_worker(ppk2: PPK2_API) -> None:
     ppk2.start_measuring()
+    measurement_started_event.set()
     print("PPK2 measuring started")
 
     window_duration = 3.0
@@ -175,7 +358,7 @@ def ppk_worker(ppk2: PPK2_API) -> None:
                 window_samples.clear()
                 window_start = now
 
-            time.sleep(0.01)  # litt raskere enn før for bedre sampling
+            time.sleep(0.001)  # litt raskere enn før for bedre sampling
 
     finally:
         ppk2.stop_measuring()
@@ -184,8 +367,8 @@ def ppk_worker(ppk2: PPK2_API) -> None:
         print("Closed ppk2 thread ok")
 
 
-def uart_worker(port: str) -> None:
-    ser = serial.Serial(port, baudrate=UART_BAUDRATE, timeout=0.2)
+def uart_worker(port: str, baudrate: int) -> None:
+    ser = serial.Serial(port, baudrate=baudrate, timeout=0.2)
 
     # Leave DTR/RTS untouched for now since plain reading worked.
     time.sleep(0.1)
@@ -220,33 +403,75 @@ def uart_worker(port: str) -> None:
 
 
 def main() -> None:
-    ppk2 = configure_ppk2(PPK2_PORT)
-    print("PPK2 configured, starting baseline recording...")
+    args = parse_args()
+    base_sample_idx = open_output_files(args.data_dir, args.append)
+    rec_state.reset(base_sample_idx)
+    stop_event.clear()
+    measurement_started_event.clear()
+
+    ppk2 = configure_ppk2(args.ppk2_port, args.mode, args.source_voltage_mv)
+    print(f"PPK2 configured in {args.mode} mode, starting baseline recording...")
     print("Modifiers:", ppk2.modifiers)
     print("adc_mult:", ppk2.adc_mult)
-    time.sleep(2.0)
+
+    if not args.disable_output_switch and not args.no_power_cycle:
+        ppk2.toggle_DUT_power("OFF")
+        print("PPK2 DUT output switch forced off before recording")
+        time.sleep(0.5)
 
     ppk_thread = threading.Thread(target=ppk_worker, args=(ppk2,))
-    uart_thread = threading.Thread(target=uart_worker, args=(UART_PORT,))
+    uart_thread = None
+    if not args.no_uart:
+        uart_thread = threading.Thread(
+            target=uart_worker,
+            args=(args.uart_port, args.uart_baudrate),
+        )
 
-    # start uart logger
-    uart_thread.start()
-    
-    # start ppk logger
-    ppk_thread.start()
-    time.sleep(1.0)
-
-    ppk2.toggle_DUT_power("ON")
-    t_ns, sample_idx = rec_state.snapshot()
-    event_file.write(f"{t_ns},{sample_idx},system,DUT_POWER_ON\n")
-    event_file.flush()
-
-    
     try:
+        if args.no_uart:
+            print("UART logging disabled (--no-uart)")
+            t_ns, sample_idx = rec_state.snapshot()
+            event_file.write(f"{t_ns},{sample_idx},system,UART_LOGGING_DISABLED\n")
+            event_file.flush()
+        else:
+            print("Temporary boot for fieldlog erase...")
+            ppk2.toggle_DUT_power("ON")
+            time.sleep(2.0)
+
+            ok = erase_fieldlog(args.uart_port, args.uart_baudrate)
+            if not ok:
+                print("WARNING: fieldlog erase was not confirmed")
+
+            print("Powering DUT off before real test run...")
+            ppk2.toggle_DUT_power("OFF")
+            time.sleep(1.0)
+
+            uart_thread.start()
+        
+        # start ppk logger
+        ppk_thread.start()
+        if not measurement_started_event.wait(timeout=3.0):
+            raise RuntimeError("PPK2 measurement did not start")
+        time.sleep(1.0)
+
+        t_ns, sample_idx = rec_state.snapshot()
+        if args.disable_output_switch:
+            event_file.write(f"{t_ns},{sample_idx},system,DUT_OUTPUT_SWITCH_DISABLED\n")
+        elif args.mode == "source":
+            ppk2.toggle_DUT_power("ON")
+            event_file.write(f"{t_ns},{sample_idx},system,DUT_POWER_ON\n")
+        else:
+            ppk2.toggle_DUT_power("ON")
+            event_file.write(f"{t_ns},{sample_idx},system,AMPERE_MODE_PASS_THROUGH_ON\n")
+        event_file.flush()
+
+        
+
         while True:
-            while not uart_queue.empty():
-                ts, msg = uart_queue.get()
-                print(f"[UART] {ts:.3f} {msg}")
+            if not args.no_uart:
+                while not uart_queue.empty():
+                    ts, msg = uart_queue.get()
+                    print(f"[UART] {ts:.3f} {msg}")
 
             time.sleep(0.05)
 
@@ -255,10 +480,16 @@ def main() -> None:
 
     finally:
         stop_event.set()
-        ppk_thread.join()
-        uart_thread.join()
-        raw_file.close()
-        event_file.close()
+        if ppk_thread.is_alive():
+            ppk_thread.join()
+        if uart_thread is not None and uart_thread.is_alive():
+            uart_thread.join()
+        if not args.no_uart:
+            dump_fieldlog(args.uart_port, args.uart_baudrate, args.data_dir)
+        if raw_file is not None:
+            raw_file.close()
+        if event_file is not None:
+            event_file.close()
         print("Clean shutdown")
 
 

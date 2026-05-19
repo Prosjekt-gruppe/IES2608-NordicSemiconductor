@@ -40,7 +40,7 @@ LEGACY_ROW_PATTERN = re.compile(
     r")"
 )
 
-V2_PREFIXES = ("state,", "summary,")
+V2_PREFIXES = ("state,", "summary,", "conneval,")
 
 FLAG_NO_BATTERY_SAMPLES = 1 << 0
 FLAG_VBUS_SEEN_V2 = 1 << 1
@@ -128,10 +128,14 @@ def parse_v2_row(row_text: str) -> dict:
     parts = next(csv.reader([row_text]))
     if len(parts) == 21 and parts and parts[0].strip() == "state":
         parts.append("")
-    if len(parts) != 22:
-        raise ValueError(f"expected 22 columns, got {len(parts)}: {row_text!r}")
-
     row_type = parts[0].strip()
+    if len(parts) == 30 and row_type == "conneval":
+        parts.insert(21, "")
+    if len(parts) not in (22, 31):
+        raise ValueError(f"expected 22 or 31 columns, got {len(parts)}: {row_text!r}")
+    if len(parts) == 22:
+        parts.extend([""] * 9)
+
     seq = int(parts[1])
     uptime_s = int(parts[2])
 
@@ -173,6 +177,23 @@ def parse_v2_row(row_text: str) -> dict:
             "flags_hex": parts[20].strip(),
             "flags_text": flags_text,
             "dropped_messages": int(parts[21]),
+        }
+
+    if row_type == "conneval":
+        return {
+            "type": "conn_eval_v1",
+            "seq": seq,
+            "uptime_s": uptime_s,
+            "uptime_hms": seconds_to_hms(uptime_s),
+            "rrc_state": int(parts[22]),
+            "ce_level": int(parts[23]),
+            "rsrp": int(parts[24]),
+            "rsrq": int(parts[25]),
+            "snr": int(parts[26]),
+            "dl_pathloss": int(parts[27]),
+            "tx_power": int(parts[28]),
+            "tx_rep": int(parts[29]),
+            "rx_rep": int(parts[30]),
         }
 
     raise ValueError(f"unknown row type: {row_type!r}")
@@ -306,6 +327,13 @@ def render_table(rows: Sequence[dict]) -> str:
                 f"{row['lte_losses_total']} | switchbacks={row['switchbacks_interval']}/"
                 f"{row['switchbacks_total']} | dropped={row['dropped_messages']} | "
                 f"flags={row['flags_text']}"
+            )
+        elif row["type"] == "conn_eval_v1":
+            details = (
+                f"rrc={row['rrc_state']} ce={row['ce_level']} | "
+                f"rsrp={row['rsrp']} rsrq={row['rsrq']} snr={row['snr']} | "
+                f"dl_pl={row['dl_pathloss']} tx_pwr={row['tx_power']} "
+                f"tx_rep={row['tx_rep']} rx_rep={row['rx_rep']}"
             )
         else:
             details = (

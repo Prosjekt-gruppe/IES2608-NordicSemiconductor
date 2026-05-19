@@ -20,7 +20,7 @@
 #include <zephyr/net/net_ip.h>
 
 #include <zephyr/logging/log.h>
-//#include <zephyr/kernel.h>
+#include <zephyr/kernel.h>
 
 /* for udp test */
 #define SERVER_PORT 41313 // port 
@@ -57,7 +57,8 @@ static int modem_at_ok(const char *cmd)
     }
 
     if (err > 0) {
-        LOG_ERR("AT failed: %s (raw=%d, at_err=%d)", cmd, err, nrf_modem_at_err(err));
+        LOG_ERR("AT failed: %s (raw=%d, type=%d, at_err=%d)",
+                cmd, err, nrf_modem_at_err_type(err), nrf_modem_at_err(err));
         return err;
     }
 
@@ -72,6 +73,32 @@ static int modem_service_switch(enum modem_access_mode mode)
     LOG_INF("switch: sending CFUN=45");
     err = modem_at_ok("AT+CFUN=45");
     LOG_INF("switch: CFUN=45 ret=%d", err);
+    if (err && mode == MODEM_ACCESS_TN) {
+        LOG_WRN("switch: CFUN=45 failed, falling back to CFUN=0 flow");
+
+        err = modem_at_ok("AT+CFUN=0");
+        LOG_INF("switch: CFUN=0 ret=%d", err);
+        if (err) {
+            return err;
+        }
+
+        k_sleep(K_SECONDS(1));
+
+        LOG_INF("switch: sending XSYSTEMMODE TN");
+        err = modem_at_ok("AT%XSYSTEMMODE=1,0,0,0,0");
+        LOG_INF("switch: XSYSTEMMODE TN ret=%d", err);
+        if (err) {
+            return err;
+        }
+
+        k_sleep(K_SECONDS(1));
+
+        LOG_INF("switch: sending CFUN=1");
+        err = modem_at_ok("AT+CFUN=1");
+        LOG_INF("switch: CFUN=1 ret=%d", err);
+        return err;
+    }
+
     if (err) {
         return err;
     }
