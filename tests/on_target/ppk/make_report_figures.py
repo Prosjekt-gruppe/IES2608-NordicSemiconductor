@@ -459,7 +459,7 @@ def plot_current_with_states(
         plot_placeholder(ax, "No current data available")
 
     fig.tight_layout()
-    fig.savefig(output_dir / "current_with_states.png", dpi=250, bbox_inches="tight")
+    fig.savefig(output_dir / "current_with_states.pdf", dpi=250, bbox_inches="tight")
 
     if show_plot:
         plt.show()
@@ -568,7 +568,7 @@ def plot_lte_rsrp_with_states(
         plot_placeholder(ax, "No LTE RSRP data available")
 
     fig.tight_layout()
-    fig.savefig(output_dir / "lte_rsrp_with_states.png", dpi=250, bbox_inches="tight")
+    fig.savefig(output_dir / "lte_rsrp_with_states.pdf", dpi=250, bbox_inches="tight")
 
     if show_plot:
         plt.show()
@@ -639,7 +639,7 @@ def plot_ntn_monitor_with_states(
 
     fig.tight_layout()
     fig.savefig(
-        output_dir / "ntn_monitor_with_states.png", dpi=250, bbox_inches="tight"
+        output_dir / "ntn_monitor_with_states.pdf", dpi=250, bbox_inches="tight"
     )
 
     if show_plot:
@@ -712,7 +712,7 @@ def plot_accel_with_states(
 
     fig.tight_layout()
     fig.savefig(
-        output_dir / "accel_motion_with_states.png", dpi=250, bbox_inches="tight"
+        output_dir / "accel_motion_with_states.pdf", dpi=250, bbox_inches="tight"
     )
 
     if show_plot:
@@ -798,7 +798,7 @@ def plot_combined_overview(
     axes[-1].set_xlabel("Time [s]")
     fig.suptitle("PPK/UART overview", y=0.98)
     fig.tight_layout()
-    fig.savefig(output_dir / "combined_overview.png", dpi=250, bbox_inches="tight")
+    fig.savefig(output_dir / "combined_overview.pdf", dpi=250, bbox_inches="tight")
 
     if show_plot:
         plt.show()
@@ -874,7 +874,7 @@ def plot_fallback_decision_rsrp(
 
         ax.axhline(
             -110,
-            linestyle="--",
+            linestyle=":",
             color="black",
             linewidth=1.2,
             alpha=0.75,
@@ -885,7 +885,7 @@ def plot_fallback_decision_rsrp(
         # lower threshold
         ax.axhline(
             -120,
-            linestyle=":",
+            linestyle="--",
             color="black",
             linewidth=1.1,
             alpha=0.55,
@@ -932,7 +932,7 @@ def plot_fallback_decision_rsrp(
 
     fig.tight_layout()
     fig.savefig(
-        output_dir / "fallback_decision_rsrp.png",
+        output_dir / "fallback_decision_rsrp.pdf",
         dpi=250,
         bbox_inches="tight",
     )
@@ -1067,12 +1067,12 @@ def main() -> int:
             current_points = len(window_samples)
 
     figure_files = [
-        "current_with_states.png",
-        "lte_rsrp_with_states.png",
-        "ntn_monitor_with_states.png",
-        "accel_motion_with_states.png",
-        "combined_overview.png",
-        "fallback_decision_rsrp.png",
+        "current_with_states.pdf",
+        "lte_rsrp_with_states.pdf",
+        "ntn_monitor_with_states.pdf",
+        "accel_motion_with_states.pdf",
+        "combined_overview.pdf",
+        "fallback_decision_rsrp.pdf",
     ]
 
     plot_current_with_states(
