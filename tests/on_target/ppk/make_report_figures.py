@@ -382,7 +382,14 @@ def add_state_shading(
             state_colors[state] = color
         label = state_label(state)
         legend_label = label if show_labels and label not in used_labels else None
-        ax.axvspan(start_s, end_s, color=color, alpha=alpha, label=legend_label)
+        ax.axvspan(
+            start_s,
+            end_s,
+            color=color,
+            alpha=alpha,
+            label=legend_label,
+            zorder=0,
+        )
         used_labels.add(label)
 
 
@@ -440,9 +447,14 @@ def plot_current_with_states(
         ax.set_xlabel("Time [s]")
         ax.set_title("Current with state intervals")
         ax.grid(True, linestyle="--", alpha=0.4)
-        add_state_shading(ax, intervals, alpha=0.12)
+        add_state_shading(ax, intervals, alpha=0.06)
         add_marker_lines(ax, markers)
-        ax.legend(loc="best", ncol=2)
+        ax.legend(
+            loc="upper left",
+            bbox_to_anchor=(1.02, 1),
+            borderaxespad=0,
+            ncol=1,
+        )
     else:
         plot_placeholder(ax, "No current data available")
 
@@ -528,13 +540,28 @@ def plot_lte_rsrp_with_states(
                 alpha=0.8,
                 label="Fallback threshold",
             )
+            ax.axhline(
+                -120,
+                linestyle=":",
+                color="black",
+                linewidth=1.1,
+                alpha=0.55,
+                label="-120 dBm reference",
+                zorder=2,
+            )
+
             ax.set_ylabel("RSRP [dBm]")
             ax.set_xlabel("Time [s]")
             ax.set_title("LTE RSRP with state intervals")
             ax.grid(True, linestyle="--", alpha=0.4)
             add_state_shading(ax, intervals, alpha=0.12)
             add_marker_lines(ax, markers)
-            ax.legend(loc="best", ncol=2)
+            ax.legend(
+                loc="upper left",
+                bbox_to_anchor=(1.02, 1),
+                borderaxespad=0,
+                ncol=1,
+            )
         else:
             plot_placeholder(ax, "No LTE RSRP data available")
     else:
@@ -562,6 +589,7 @@ def plot_ntn_monitor_with_states(
     fig, ax1 = plt.subplots(figsize=FIGSIZE)
 
     rsrp_t, rsrp = extract_series(df, t_col, "rsrp_raw")
+    rsrp_dbm = rsrp - 141
     snr_t, snr = extract_series(df, t_col, "snr")
     plotted_points = 0
 
@@ -569,16 +597,17 @@ def plot_ntn_monitor_with_states(
         if len(rsrp_t):
             ax1.plot(
                 rsrp_t,
-                rsrp,
+                rsrp_dbm,
                 marker="o",
                 markersize=3,
                 linewidth=1.2,
                 alpha=0.9,
                 color="tab:purple",
-                label="NTN RSRP raw",
+                label="NTN RSRP estimated [dBm]",
+                zorder=2,
             )
             plotted_points = max(plotted_points, len(rsrp_t))
-        ax1.set_ylabel("NTN RSRP raw")
+        ax1.set_ylabel("NTN RSRP estimated [dBm]")
         ax1.set_xlabel("Time [s]")
         ax1.grid(True, linestyle="--", alpha=0.4)
 
@@ -734,11 +763,12 @@ def plot_combined_overview(
     # Panel 3: NTN RSRP/SNR
     ax = axes[2]
     rsrp_t, rsrp = extract_series(ntn_df, ntn_t_col, "rsrp_raw")
+    rsrp_dbm = rsrp - 141
     snr_t, snr = extract_series(ntn_df, ntn_t_col, "snr")
     if len(rsrp_t) or len(snr_t):
         if len(rsrp_t):
-            ax.plot(rsrp_t, rsrp, linewidth=1.2, color="tab:purple")
-            ax.set_ylabel("NTN RSRP")
+            ax.plot(rsrp_t, rsrp_dbm, linewidth=1.2, color="tab:purple")
+            ax.set_ylabel("NTN RSRP [dbm]")
         ax.grid(True, linestyle="--", alpha=0.3)
         if len(snr_t):
             ax2 = ax.twinx()
@@ -774,6 +804,145 @@ def plot_combined_overview(
         plt.show()
     else:
         plt.close(fig)
+
+def plot_fallback_decision_rsrp(
+    output_dir: Path,
+    conneval_df: pd.DataFrame,
+    conneval_t_col: str,
+    ntn_df: pd.DataFrame,
+    ntn_t_col: str,
+    intervals: list[tuple[str, float, float]],
+    markers: list[Marker],
+    show_plot: bool,
+) -> int:
+    """Focused figure showing LTE-M degradation, fallback threshold and NTN monitoring."""
+    fig, ax = plt.subplots(figsize=(10, 5))
+
+    plotted_points = 0
+
+    # LTE-M RSRP in dBm
+    lte_t, lte_rsrp = extract_series(conneval_df, conneval_t_col, "rsrp_dbm")
+
+    # NTN monitor RSRP is reported as modem RSRP index.
+    # Convert to lower dBm boundary using rsrp_dbm = rsrp_raw - 141.
+    ntn_t, ntn_rsrp_raw = extract_series(ntn_df, ntn_t_col, "rsrp_raw")
+    ntn_rsrp_dbm = ntn_rsrp_raw - 141 if len(ntn_rsrp_raw) else np.array([])
+
+    has_data = len(lte_t) or len(ntn_t)
+
+    if has_data:
+        add_state_shading(ax, intervals, alpha=0.12)
+
+        if len(lte_t):
+            gap_threshold_s = 30.0
+
+            lte_t_plot = lte_t.copy()
+            lte_rsrp_plot = lte_rsrp.copy()
+
+            time_diff = np.diff(lte_t_plot)
+
+            gap_indices = np.where(time_diff > gap_threshold_s)[0]
+
+            for idx in gap_indices:
+                lte_rsrp_plot[idx + 1] = np.nan
+            ax.plot(
+                lte_t_plot,
+                lte_rsrp_plot,
+                marker="o",
+                markersize=4,
+                linewidth=1.5,
+                alpha=0.95,
+                color="tab:red",
+                label="LTE-M RSRP [dBm]",
+                zorder=3,
+            )
+            plotted_points += len(lte_t)
+
+        if len(ntn_t):
+            ax.plot(
+                ntn_t,
+                ntn_rsrp_dbm,
+                marker="s",
+                markersize=4,
+                linewidth=1.5,
+                alpha=0.9,
+                color="tab:purple",
+                label="NTN RSRP estimated [dBm]",
+                zorder=3,
+            )
+            plotted_points += len(ntn_t)
+
+        ax.axhline(
+            -110,
+            linestyle="--",
+            color="black",
+            linewidth=1.2,
+            alpha=0.75,
+            label="Fallback threshold",
+            zorder=2,
+        )
+
+        # lower threshold
+        ax.axhline(
+            -120,
+            linestyle=":",
+            color="black",
+            linewidth=1.1,
+            alpha=0.55,
+            label="-120 dBm reference",
+            zorder=2,
+        )
+
+
+        relevant_marker_labels = {
+            "LTE-M fallback",
+            "Starting NTN",
+            "Switched to NTN",
+            "LTE probe",
+            "LTE-M recovered",
+            "Stay on NTN",
+        }
+        focused_markers = [
+            marker for marker in markers if marker.label in relevant_marker_labels
+        ]
+        for marker in focused_markers:
+            ax.axvline(
+                marker.t_s,
+                linestyle="--",
+                color="tab:gray",
+                alpha=0.5,
+                linewidth=1.0,
+                zorder=1,
+            )
+        #add_marker_lines(ax, focused_markers)
+
+        ax.set_xlabel("Time [s]")
+        ax.set_ylabel("RSRP [dBm]")
+        ax.set_title("Fallback decision from LTE-M degradation to NTN operation")
+        ax.grid(True, linestyle="--", alpha=0.3)
+
+        ax.legend(
+            loc="upper left",
+            bbox_to_anchor=(1.02, 1.0),
+            borderaxespad=0,
+            ncol=1,
+        )
+    else:
+        plot_placeholder(ax, "No LTE/NTN RSRP data available")
+
+    fig.tight_layout()
+    fig.savefig(
+        output_dir / "fallback_decision_rsrp.png",
+        dpi=250,
+        bbox_inches="tight",
+    )
+
+    if show_plot:
+        plt.show()
+    else:
+        plt.close(fig)
+
+    return plotted_points
 
 
 def write_summary(
@@ -903,6 +1072,7 @@ def main() -> int:
         "ntn_monitor_with_states.png",
         "accel_motion_with_states.png",
         "combined_overview.png",
+        "fallback_decision_rsrp.png",
     ]
 
     plot_current_with_states(
@@ -946,6 +1116,17 @@ def main() -> int:
         intervals,
         not args.no_show,
     )
+    fallback_points = plot_fallback_decision_rsrp(
+        output_dir,
+        conneval_df,
+        conneval_t_col,
+        ntn_df,
+        ntn_t_col,
+        intervals,
+        markers,
+        not args.no_show,
+    )
+    _ = fallback_points
 
     write_summary(
         output_dir,
