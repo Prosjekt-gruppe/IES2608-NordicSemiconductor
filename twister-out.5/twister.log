@@ -1,0 +1,54 @@
+2026-05-13 15:23:19,396 - twister - INFO - Using Ninja..
+2026-05-13 15:23:19,813 - twister - INFO - Zephyr version: ncs-v3.2.4
+2026-05-13 15:23:19,852 - twister - DEBUG - Running cmake script C:\Users\golde\Documents\NTNU\ncs\v3.2.4\zephyr\cmake\verify-toolchain.cmake
+2026-05-13 15:23:19,853 - twister - DEBUG - Calling cmake: ['C:\\ncs\\toolchains\\fd21892d0f\\opt\\bin\\cmake.EXE', '-DFORMAT=json', '-P', 'C:\\Users\\golde\\Documents\\NTNU\\ncs\\v3.2.4\\zephyr\\cmake\\verify-toolchain.cmake']
+2026-05-13 15:23:21,134 - twister - DEBUG - Finished running C:\Users\golde\Documents\NTNU\ncs\v3.2.4\zephyr\cmake\verify-toolchain.cmake
+2026-05-13 15:23:21,136 - twister - INFO - Using 'zephyr' toolchain.
+2026-05-13 15:23:23,806 - twister - DEBUG - Reading testsuite configuration files under C:\Users\golde\Documents\NTNU\IES2608\tests\modules...
+2026-05-13 15:23:23,807 - twister - DEBUG - Found possible testsuite in C:\Users\golde\Documents\NTNU\IES2608\tests\modules\gnss_service
+2026-05-13 15:23:23,811 - twister - DEBUG - Found possible testsuite in C:\Users\golde\Documents\NTNU\IES2608\tests\modules\lte_service
+2026-05-13 15:23:23,813 - twister - DEBUG - Found possible testsuite in C:\Users\golde\Documents\NTNU\IES2608\tests\modules\modem_service
+2026-05-13 15:23:23,815 - twister - DEBUG - Found possible testsuite in C:\Users\golde\Documents\NTNU\IES2608\tests\modules\ntn_service
+2026-05-13 15:23:23,817 - twister - DEBUG - Found possible testsuite in C:\Users\golde\Documents\NTNU\IES2608\tests\modules\rsrp_service
+2026-05-13 15:23:23,822 - twister - DEBUG - Found possible testsuite in C:\Users\golde\Documents\NTNU\IES2608\tests\modules\sensors_service
+2026-05-13 15:23:23,825 - twister - DEBUG - No duplicates found.
+2026-05-13 15:23:23,825 - twister - DEBUG -  platform filter: ['unit_testing']
+2026-05-13 15:23:23,825 - twister - DEBUG - platform_pattern: []
+2026-05-13 15:23:23,825 - twister - DEBUG -    vendor filter: []
+2026-05-13 15:23:23,825 - twister - DEBUG -      arch_filter: None
+2026-05-13 15:23:23,825 - twister - DEBUG -       tag_filter: None
+2026-05-13 15:23:23,825 - twister - DEBUG -      exclude_tag: None
+2026-05-13 15:23:23,825 - twister - DEBUG - Checking platform filter: ['unit_testing']
+2026-05-13 15:23:23,825 - twister - INFO - Building initial testsuite list...
+2026-05-13 15:23:23,847 - twister - INFO - Writing JSON report C:\Users\golde\Documents\NTNU\IES2608\twister-out\testplan.json
+2026-05-13 15:23:24,728 - twister - INFO - Adding tasks to the queue...
+2026-05-13 15:23:24,728 - twister - DEBUG - adding unit_testing/unit_testing\host\app.gnss_service.logic
+2026-05-13 15:23:24,729 - twister - DEBUG - adding unit_testing/unit_testing\host\app.lte_service.logic
+2026-05-13 15:23:24,729 - twister - DEBUG - adding unit_testing/unit_testing\host\app.modem_service.logic
+2026-05-13 15:23:24,729 - twister - DEBUG - adding unit_testing/unit_testing\host\app.ntn_service.logic
+2026-05-13 15:23:24,729 - twister - DEBUG - adding unit_testing/unit_testing\host\app.rsrp_service.logic
+2026-05-13 15:23:24,729 - twister - DEBUG - adding unit_testing/unit_testing\host\app.sensors_service.logic
+2026-05-13 15:23:24,730 - twister - INFO - Added initial list of jobs to queue
+2026-05-13 15:23:25,570 - twister - DEBUG - Launched 1 jobs
+2026-05-13 15:23:25,574 - twister - DEBUG - Running cmake on C:\Users\golde\Documents\NTNU\IES2608\tests\modules\sensors_service for unit_testing/unit_testing
+2026-05-13 15:23:25,580 - twister - DEBUG - Calling cmake: [None, '-BC:\\Users\\golde\\Documents\\NTNU\\IES2608\\twister-out\\unit_testing_unit_testing\\host\\IES2608\\tests\\modules\\sensors_service\\app.sensors_service.logic', '-DTC_RUNID=228dc07e85b059d2b196878431686e2d', '-DTC_NAME=app.sensors_service.logic', '-DCONFIG_COMPILER_WARNINGS_AS_ERRORS=y', '-DEXTRA_GEN_EDT_ARGS=--edtlib-Werror', '-GNinja', '-DPython3_EXECUTABLE=C:/ncs/toolchains/fd21892d0f/opt/bin/python.exe', '-DZEPHYR_TOOLCHAIN_VARIANT=host', '-SC:\\Users\\golde\\Documents\\NTNU\\IES2608\\tests\\modules\\sensors_service', '-DBOARD=unit_testing/unit_testing']
+2026-05-13 15:23:25,581 - twister - ERROR - General exception: expected str, bytes or os.PathLike object, not NoneType
+Traceback (most recent call last):
+  File "C:\Users\golde\Documents\NTNU\ncs\v3.2.4\zephyr\scripts/pylib/twister\twisterlib\runner.py", line 2009, in pipeline_mgr
+    pb.process(pipeline, done_queue, task, lock, results)
+  File "C:\Users\golde\Documents\NTNU\ncs\v3.2.4\zephyr\scripts/pylib/twister\twisterlib\runner.py", line 998, in process
+    ret = self.cmake()
+          ^^^^^^^^^^^^
+  File "C:\Users\golde\Documents\NTNU\ncs\v3.2.4\zephyr\scripts/pylib/twister\twisterlib\runner.py", line 1723, in cmake
+    return self.run_cmake(args,filter_stages)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\golde\Documents\NTNU\ncs\v3.2.4\zephyr\scripts/pylib/twister\twisterlib\runner.py", line 723, in run_cmake
+    p = subprocess.Popen(cmd, **kwargs)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "subprocess.py", line 1026, in __init__
+  File "subprocess.py", line 1462, in _execute_child
+  File "subprocess.py", line 608, in list2cmdline
+  File "<frozen os>", line 859, in fsdecode
+TypeError: expected str, bytes or os.PathLike object, not NoneType
+
+2026-05-13 15:23:25,611 - twister - ERROR - Process 23856 failed, aborting execution

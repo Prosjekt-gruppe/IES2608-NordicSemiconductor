@@ -1,0 +1,4 @@
+2026-05-13 15:18:51,285 - twister - INFO - Using Ninja..
+2026-05-13 15:18:51,608 - twister - INFO - Zephyr version: ncs-v3.2.4
+2026-05-13 15:18:51,645 - twister - DEBUG - Running cmake script C:\Users\golde\Documents\NTNU\ncs\v3.2.4\zephyr\cmake\verify-toolchain.cmake
+2026-05-13 15:18:51,652 - twister - ERROR - Unable to find `cmake` in path

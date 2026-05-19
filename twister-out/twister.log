@@ -1,0 +1,345 @@
+2026-05-13 15:24:04,675 - twister - INFO - Using Ninja..
+2026-05-13 15:24:05,086 - twister - INFO - Zephyr version: ncs-v3.2.4
+2026-05-13 15:24:05,123 - twister - DEBUG - Running cmake script C:\Users\golde\Documents\NTNU\ncs\v3.2.4\zephyr\cmake\verify-toolchain.cmake
+2026-05-13 15:24:05,125 - twister - DEBUG - Calling cmake: ['C:\\ncs\\toolchains\\fd21892d0f\\opt\\bin\\cmake.EXE', '-DFORMAT=json', '-P', 'C:\\Users\\golde\\Documents\\NTNU\\ncs\\v3.2.4\\zephyr\\cmake\\verify-toolchain.cmake']
+2026-05-13 15:24:06,557 - twister - DEBUG - Finished running C:\Users\golde\Documents\NTNU\ncs\v3.2.4\zephyr\cmake\verify-toolchain.cmake
+2026-05-13 15:24:06,557 - twister - INFO - Using 'zephyr' toolchain.
+2026-05-13 15:24:10,370 - twister - DEBUG - Reading testsuite configuration files under C:\Users\golde\Documents\NTNU\IES2608\tests\modules...
+2026-05-13 15:24:10,371 - twister - DEBUG - Found possible testsuite in C:\Users\golde\Documents\NTNU\IES2608\tests\modules\gnss_service
+2026-05-13 15:24:10,377 - twister - DEBUG - Found possible testsuite in C:\Users\golde\Documents\NTNU\IES2608\tests\modules\lte_service
+2026-05-13 15:24:10,380 - twister - DEBUG - Found possible testsuite in C:\Users\golde\Documents\NTNU\IES2608\tests\modules\modem_service
+2026-05-13 15:24:10,384 - twister - DEBUG - Found possible testsuite in C:\Users\golde\Documents\NTNU\IES2608\tests\modules\ntn_service
+2026-05-13 15:24:10,387 - twister - DEBUG - Found possible testsuite in C:\Users\golde\Documents\NTNU\IES2608\tests\modules\rsrp_service
+2026-05-13 15:24:10,391 - twister - DEBUG - Found possible testsuite in C:\Users\golde\Documents\NTNU\IES2608\tests\modules\sensors_service
+2026-05-13 15:24:10,397 - twister - DEBUG - No duplicates found.
+2026-05-13 15:24:10,397 - twister - DEBUG -  platform filter: ['unit_testing']
+2026-05-13 15:24:10,397 - twister - DEBUG - platform_pattern: []
+2026-05-13 15:24:10,397 - twister - DEBUG -    vendor filter: []
+2026-05-13 15:24:10,397 - twister - DEBUG -      arch_filter: None
+2026-05-13 15:24:10,397 - twister - DEBUG -       tag_filter: None
+2026-05-13 15:24:10,397 - twister - DEBUG -      exclude_tag: None
+2026-05-13 15:24:10,397 - twister - DEBUG - Checking platform filter: ['unit_testing']
+2026-05-13 15:24:10,397 - twister - INFO - Building initial testsuite list...
+2026-05-13 15:24:10,412 - twister - INFO - Writing JSON report C:\Users\golde\Documents\NTNU\IES2608\twister-out\testplan.json
+2026-05-13 15:24:11,351 - twister - INFO - Adding tasks to the queue...
+2026-05-13 15:24:11,352 - twister - DEBUG - adding unit_testing/unit_testing\host\app.gnss_service.logic
+2026-05-13 15:24:11,353 - twister - DEBUG - adding unit_testing/unit_testing\host\app.lte_service.logic
+2026-05-13 15:24:11,355 - twister - DEBUG - adding unit_testing/unit_testing\host\app.modem_service.logic
+2026-05-13 15:24:11,355 - twister - DEBUG - adding unit_testing/unit_testing\host\app.ntn_service.logic
+2026-05-13 15:24:11,356 - twister - DEBUG - adding unit_testing/unit_testing\host\app.rsrp_service.logic
+2026-05-13 15:24:11,357 - twister - DEBUG - adding unit_testing/unit_testing\host\app.sensors_service.logic
+2026-05-13 15:24:11,358 - twister - INFO - Added initial list of jobs to queue
+2026-05-13 15:24:12,152 - twister - DEBUG - Running cmake on C:\Users\golde\Documents\NTNU\IES2608\tests\modules\sensors_service for unit_testing/unit_testing
+2026-05-13 15:24:12,152 - twister - DEBUG - Calling cmake: ['C:\\ncs\\toolchains\\fd21892d0f\\opt\\bin\\cmake.EXE', '-BC:\\Users\\golde\\Documents\\NTNU\\IES2608\\twister-out\\unit_testing_unit_testing\\host\\IES2608\\tests\\modules\\sensors_service\\app.sensors_service.logic', '-DTC_RUNID=9da63417a6accd22d393287279a26c03', '-DTC_NAME=app.sensors_service.logic', '-DCONFIG_COMPILER_WARNINGS_AS_ERRORS=y', '-DEXTRA_GEN_EDT_ARGS=--edtlib-Werror', '-GNinja', '-DPython3_EXECUTABLE=C:/ncs/toolchains/fd21892d0f/opt/bin/python.exe', '-DZEPHYR_TOOLCHAIN_VARIANT=host', '-SC:\\Users\\golde\\Documents\\NTNU\\IES2608\\tests\\modules\\sensors_service', '-DBOARD=unit_testing/unit_testing']
+2026-05-13 15:24:13,107 - twister - DEBUG - Running cmake on C:\Users\golde\Documents\NTNU\IES2608\tests\modules\rsrp_service for unit_testing/unit_testing
+2026-05-13 15:24:13,108 - twister - DEBUG - Calling cmake: ['C:\\ncs\\toolchains\\fd21892d0f\\opt\\bin\\cmake.EXE', '-BC:\\Users\\golde\\Documents\\NTNU\\IES2608\\twister-out\\unit_testing_unit_testing\\host\\IES2608\\tests\\modules\\rsrp_service\\app.rsrp_service.logic', '-DTC_RUNID=b93a6d0cfec5bfc055bda9abb2256841', '-DTC_NAME=app.rsrp_service.logic', '-DCONFIG_COMPILER_WARNINGS_AS_ERRORS=y', '-DEXTRA_GEN_EDT_ARGS=--edtlib-Werror', '-GNinja', '-DPython3_EXECUTABLE=C:/ncs/toolchains/fd21892d0f/opt/bin/python.exe', '-DZEPHYR_TOOLCHAIN_VARIANT=host', '-SC:\\Users\\golde\\Documents\\NTNU\\IES2608\\tests\\modules\\rsrp_service', '-DBOARD=unit_testing/unit_testing']
+2026-05-13 15:24:14,056 - twister - DEBUG - Running cmake on C:\Users\golde\Documents\NTNU\IES2608\tests\modules\ntn_service for unit_testing/unit_testing
+2026-05-13 15:24:14,057 - twister - DEBUG - Calling cmake: ['C:\\ncs\\toolchains\\fd21892d0f\\opt\\bin\\cmake.EXE', '-BC:\\Users\\golde\\Documents\\NTNU\\IES2608\\twister-out\\unit_testing_unit_testing\\host\\IES2608\\tests\\modules\\ntn_service\\app.ntn_service.logic', '-DTC_RUNID=455124db8333e16f342e6a5742c5c54a', '-DTC_NAME=app.ntn_service.logic', '-DCONFIG_COMPILER_WARNINGS_AS_ERRORS=y', '-DEXTRA_GEN_EDT_ARGS=--edtlib-Werror', '-GNinja', '-DPython3_EXECUTABLE=C:/ncs/toolchains/fd21892d0f/opt/bin/python.exe', '-DZEPHYR_TOOLCHAIN_VARIANT=host', '-SC:\\Users\\golde\\Documents\\NTNU\\IES2608\\tests\\modules\\ntn_service', '-DBOARD=unit_testing/unit_testing']
+2026-05-13 15:24:15,155 - twister - DEBUG - Running cmake on C:\Users\golde\Documents\NTNU\IES2608\tests\modules\modem_service for unit_testing/unit_testing
+2026-05-13 15:24:15,156 - twister - DEBUG - Calling cmake: ['C:\\ncs\\toolchains\\fd21892d0f\\opt\\bin\\cmake.EXE', '-BC:\\Users\\golde\\Documents\\NTNU\\IES2608\\twister-out\\unit_testing_unit_testing\\host\\IES2608\\tests\\modules\\modem_service\\app.modem_service.logic', '-DTC_RUNID=e1c622853096c532836b70c299a554cd', '-DTC_NAME=app.modem_service.logic', '-DCONFIG_COMPILER_WARNINGS_AS_ERRORS=y', '-DEXTRA_GEN_EDT_ARGS=--edtlib-Werror', '-GNinja', '-DPython3_EXECUTABLE=C:/ncs/toolchains/fd21892d0f/opt/bin/python.exe', '-DZEPHYR_TOOLCHAIN_VARIANT=host', '-SC:\\Users\\golde\\Documents\\NTNU\\IES2608\\tests\\modules\\modem_service', '-DBOARD=unit_testing/unit_testing']
+2026-05-13 15:24:16,375 - twister - DEBUG - Running cmake on C:\Users\golde\Documents\NTNU\IES2608\tests\modules\lte_service for unit_testing/unit_testing
+2026-05-13 15:24:16,377 - twister - DEBUG - Calling cmake: ['C:\\ncs\\toolchains\\fd21892d0f\\opt\\bin\\cmake.EXE', '-BC:\\Users\\golde\\Documents\\NTNU\\IES2608\\twister-out\\unit_testing_unit_testing\\host\\IES2608\\tests\\modules\\lte_service\\app.lte_service.logic', '-DTC_RUNID=75edf4e21213e3663fe0245bb335f4a9', '-DTC_NAME=app.lte_service.logic', '-DCONFIG_COMPILER_WARNINGS_AS_ERRORS=y', '-DEXTRA_GEN_EDT_ARGS=--edtlib-Werror', '-GNinja', '-DPython3_EXECUTABLE=C:/ncs/toolchains/fd21892d0f/opt/bin/python.exe', '-DZEPHYR_TOOLCHAIN_VARIANT=host', '-SC:\\Users\\golde\\Documents\\NTNU\\IES2608\\tests\\modules\\lte_service', '-DBOARD=unit_testing/unit_testing']
+2026-05-13 15:24:17,632 - twister - DEBUG - Running cmake on C:\Users\golde\Documents\NTNU\IES2608\tests\modules\gnss_service for unit_testing/unit_testing
+2026-05-13 15:24:17,633 - twister - DEBUG - Calling cmake: ['C:\\ncs\\toolchains\\fd21892d0f\\opt\\bin\\cmake.EXE', '-BC:\\Users\\golde\\Documents\\NTNU\\IES2608\\twister-out\\unit_testing_unit_testing\\host\\IES2608\\tests\\modules\\gnss_service\\app.gnss_service.logic', '-DTC_RUNID=9a9836e76fb77bc7c43a51dc034006dd', '-DTC_NAME=app.gnss_service.logic', '-DCONFIG_COMPILER_WARNINGS_AS_ERRORS=y', '-DEXTRA_GEN_EDT_ARGS=--edtlib-Werror', '-GNinja', '-DPython3_EXECUTABLE=C:/ncs/toolchains/fd21892d0f/opt/bin/python.exe', '-DZEPHYR_TOOLCHAIN_VARIANT=host', '-SC:\\Users\\golde\\Documents\\NTNU\\IES2608\\tests\\modules\\gnss_service', '-DBOARD=unit_testing/unit_testing']
+2026-05-13 15:24:26,057 - twister - ERROR - CMake build failure: C:\Users\golde\Documents\NTNU\IES2608\tests\modules\sensors_service for unit_testing/unit_testing
+2026-05-13 15:24:26,063 - twister - ERROR - unit_testing/unit_testing app.sensors_service.logic                          [31mERROR[39m: CMake build failure
+2026-05-13 15:24:26,063 - twister - INFO - C:\Users\golde\Documents\NTNU\IES2608\twister-out\unit_testing_unit_testing\host\IES2608\tests\modules\sensors_service\app.sensors_service.logic\build.log
+2026-05-13 15:24:26,075 - twister - ERROR - Loading Zephyr module(s) (Zephyr base): unittest
+-- Found Python3: C:/ncs/toolchains/fd21892d0f/opt/bin/python.exe (found suitable version "3.12.4", minimum required is "3.10") found components: Interpreter 
+-- Cache files will be written to: C:/Users/golde/Documents/NTNU/ncs/v3.2.4/zephyr/.cache
+-- Found west (found suitable version "1.4.0", minimum required is "0.14.0")
+-- Board: unit_testing, qualifiers: unit_testing
+Parsing C:/Users/golde/Documents/NTNU/ncs/v3.2.4/zephyr/Kconfig
+
+Loaded configuration 'C:/Users/golde/Documents/NTNU/ncs/v3.2.4/zephyr/subsys/testsuite/boards/unit_testing/unit_testing/unit_testing_defconfig'
+
+Merged configuration 'C:/Users/golde/Documents/NTNU/IES2608/tests/modules/sensors_service/prj.conf'
+
+Merged configuration 'C:/Users/golde/Documents/NTNU/IES2608/twister-out/unit_testing_unit_testing/host/IES2608/tests/modules/sensors_service/app.sensors_service.logic/zephyr/misc/generated/extra_kconfig_options.conf'
+
+Configuration saved to 'C:/Users/golde/Documents/NTNU/IES2608/twister-out/unit_testing_unit_testing/host/IES2608/tests/modules/sensors_service/app.sensors_service.logic/zephyr/.config'
+
+Kconfig header saved to 'C:/Users/golde/Documents/NTNU/IES2608/twister-out/unit_testing_unit_testing/host/IES2608/tests/modules/sensors_service/app.sensors_service.logic/zephyr/include/generated/zephyr/autoconf.h'
+
+-- Found host-tools: zephyr 0.17.0 (C:/ncs/toolchains/fd21892d0f/opt/zephyr-sdk)
+-- Found toolchain: host (gcc/ld)
+CMake Error at C:/Users/golde/Documents/NTNU/ncs/v3.2.4/zephyr/cmake/compiler/host-gcc/generic.cmake:5 (find_program):
+
+  Could not find CMAKE_C_COMPILER using the following names: gcc
+
+Call Stack (most recent call first):
+
+  C:/Users/golde/Documents/NTNU/ncs/v3.2.4/zephyr/cmake/modules/FindHostTools.cmake:113 (include)
+
+  C:/Users/golde/Documents/NTNU/ncs/v3.2.4/zephyr/cmake/modules/FindTargetTools.cmake:24 (find_package)
+
+  C:/Users/golde/Documents/NTNU/ncs/v3.2.4/zephyr/cmake/modules/unittest.cmake:18 (find_package)
+
+  C:/Users/golde/Documents/NTNU/ncs/v3.2.4/zephyr/share/zephyr-package/cmake/ZephyrConfig.cmake:75 (include)
+
+  C:/Users/golde/Documents/NTNU/ncs/v3.2.4/zephyr/share/zephyr-package/cmake/ZephyrConfig.cmake:92 (include_boilerplate)
+
+  CMakeLists.txt:9 (find_package)
+
+
+
+
+-- Configuring incomplete, errors occurred!
+
+2026-05-13 15:24:26,075 - twister - INFO - C:\Users\golde\Documents\NTNU\IES2608\twister-out\unit_testing_unit_testing\host\IES2608\tests\modules\sensors_service\app.sensors_service.logic\build.log
+2026-05-13 15:24:26,628 - twister - ERROR - CMake build failure: C:\Users\golde\Documents\NTNU\IES2608\tests\modules\rsrp_service for unit_testing/unit_testing
+2026-05-13 15:24:26,633 - twister - ERROR - unit_testing/unit_testing app.rsrp_service.logic                             [31mERROR[39m: CMake build failure
+2026-05-13 15:24:26,635 - twister - INFO - C:\Users\golde\Documents\NTNU\IES2608\twister-out\unit_testing_unit_testing\host\IES2608\tests\modules\rsrp_service\app.rsrp_service.logic\build.log
+2026-05-13 15:24:26,647 - twister - ERROR - Loading Zephyr module(s) (Zephyr base): unittest
+-- Found Python3: C:/ncs/toolchains/fd21892d0f/opt/bin/python.exe (found suitable version "3.12.4", minimum required is "3.10") found components: Interpreter 
+-- Cache files will be written to: C:/Users/golde/Documents/NTNU/ncs/v3.2.4/zephyr/.cache
+-- Found west (found suitable version "1.4.0", minimum required is "0.14.0")
+-- Board: unit_testing, qualifiers: unit_testing
+Parsing C:/Users/golde/Documents/NTNU/ncs/v3.2.4/zephyr/Kconfig
+
+Loaded configuration 'C:/Users/golde/Documents/NTNU/ncs/v3.2.4/zephyr/subsys/testsuite/boards/unit_testing/unit_testing/unit_testing_defconfig'
+
+Merged configuration 'C:/Users/golde/Documents/NTNU/IES2608/tests/modules/rsrp_service/prj.conf'
+
+Merged configuration 'C:/Users/golde/Documents/NTNU/IES2608/twister-out/unit_testing_unit_testing/host/IES2608/tests/modules/rsrp_service/app.rsrp_service.logic/zephyr/misc/generated/extra_kconfig_options.conf'
+
+Configuration saved to 'C:/Users/golde/Documents/NTNU/IES2608/twister-out/unit_testing_unit_testing/host/IES2608/tests/modules/rsrp_service/app.rsrp_service.logic/zephyr/.config'
+
+Kconfig header saved to 'C:/Users/golde/Documents/NTNU/IES2608/twister-out/unit_testing_unit_testing/host/IES2608/tests/modules/rsrp_service/app.rsrp_service.logic/zephyr/include/generated/zephyr/autoconf.h'
+
+-- Found host-tools: zephyr 0.17.0 (C:/ncs/toolchains/fd21892d0f/opt/zephyr-sdk)
+-- Found toolchain: host (gcc/ld)
+CMake Error at C:/Users/golde/Documents/NTNU/ncs/v3.2.4/zephyr/cmake/compiler/host-gcc/generic.cmake:5 (find_program):
+
+  Could not find CMAKE_C_COMPILER using the following names: gcc
+
+Call Stack (most recent call first):
+
+  C:/Users/golde/Documents/NTNU/ncs/v3.2.4/zephyr/cmake/modules/FindHostTools.cmake:113 (include)
+
+  C:/Users/golde/Documents/NTNU/ncs/v3.2.4/zephyr/cmake/modules/FindTargetTools.cmake:24 (find_package)
+
+  C:/Users/golde/Documents/NTNU/ncs/v3.2.4/zephyr/cmake/modules/unittest.cmake:18 (find_package)
+
+  C:/Users/golde/Documents/NTNU/ncs/v3.2.4/zephyr/share/zephyr-package/cmake/ZephyrConfig.cmake:75 (include)
+
+  C:/Users/golde/Documents/NTNU/ncs/v3.2.4/zephyr/share/zephyr-package/cmake/ZephyrConfig.cmake:92 (include_boilerplate)
+
+  CMakeLists.txt:9 (find_package)
+
+
+
+
+-- Configuring incomplete, errors occurred!
+
+2026-05-13 15:24:26,647 - twister - INFO - C:\Users\golde\Documents\NTNU\IES2608\twister-out\unit_testing_unit_testing\host\IES2608\tests\modules\rsrp_service\app.rsrp_service.logic\build.log
+2026-05-13 15:24:27,468 - twister - ERROR - CMake build failure: C:\Users\golde\Documents\NTNU\IES2608\tests\modules\ntn_service for unit_testing/unit_testing
+2026-05-13 15:24:27,474 - twister - ERROR - unit_testing/unit_testing app.ntn_service.logic                              [31mERROR[39m: CMake build failure
+2026-05-13 15:24:27,475 - twister - INFO - C:\Users\golde\Documents\NTNU\IES2608\twister-out\unit_testing_unit_testing\host\IES2608\tests\modules\ntn_service\app.ntn_service.logic\build.log
+2026-05-13 15:24:27,484 - twister - ERROR - Loading Zephyr module(s) (Zephyr base): unittest
+-- Found Python3: C:/ncs/toolchains/fd21892d0f/opt/bin/python.exe (found suitable version "3.12.4", minimum required is "3.10") found components: Interpreter 
+-- Cache files will be written to: C:/Users/golde/Documents/NTNU/ncs/v3.2.4/zephyr/.cache
+-- Found west (found suitable version "1.4.0", minimum required is "0.14.0")
+-- Board: unit_testing, qualifiers: unit_testing
+Parsing C:/Users/golde/Documents/NTNU/ncs/v3.2.4/zephyr/Kconfig
+
+Loaded configuration 'C:/Users/golde/Documents/NTNU/ncs/v3.2.4/zephyr/subsys/testsuite/boards/unit_testing/unit_testing/unit_testing_defconfig'
+
+Merged configuration 'C:/Users/golde/Documents/NTNU/IES2608/tests/modules/ntn_service/prj.conf'
+
+Merged configuration 'C:/Users/golde/Documents/NTNU/IES2608/twister-out/unit_testing_unit_testing/host/IES2608/tests/modules/ntn_service/app.ntn_service.logic/zephyr/misc/generated/extra_kconfig_options.conf'
+
+Configuration saved to 'C:/Users/golde/Documents/NTNU/IES2608/twister-out/unit_testing_unit_testing/host/IES2608/tests/modules/ntn_service/app.ntn_service.logic/zephyr/.config'
+
+Kconfig header saved to 'C:/Users/golde/Documents/NTNU/IES2608/twister-out/unit_testing_unit_testing/host/IES2608/tests/modules/ntn_service/app.ntn_service.logic/zephyr/include/generated/zephyr/autoconf.h'
+
+-- Found host-tools: zephyr 0.17.0 (C:/ncs/toolchains/fd21892d0f/opt/zephyr-sdk)
+-- Found toolchain: host (gcc/ld)
+CMake Error at C:/Users/golde/Documents/NTNU/ncs/v3.2.4/zephyr/cmake/compiler/host-gcc/generic.cmake:5 (find_program):
+
+  Could not find CMAKE_C_COMPILER using the following names: gcc
+
+Call Stack (most recent call first):
+
+  C:/Users/golde/Documents/NTNU/ncs/v3.2.4/zephyr/cmake/modules/FindHostTools.cmake:113 (include)
+
+  C:/Users/golde/Documents/NTNU/ncs/v3.2.4/zephyr/cmake/modules/FindTargetTools.cmake:24 (find_package)
+
+  C:/Users/golde/Documents/NTNU/ncs/v3.2.4/zephyr/cmake/modules/unittest.cmake:18 (find_package)
+
+  C:/Users/golde/Documents/NTNU/ncs/v3.2.4/zephyr/share/zephyr-package/cmake/ZephyrConfig.cmake:75 (include)
+
+  C:/Users/golde/Documents/NTNU/ncs/v3.2.4/zephyr/share/zephyr-package/cmake/ZephyrConfig.cmake:92 (include_boilerplate)
+
+  CMakeLists.txt:9 (find_package)
+
+
+
+
+-- Configuring incomplete, errors occurred!
+
+2026-05-13 15:24:27,484 - twister - INFO - C:\Users\golde\Documents\NTNU\IES2608\twister-out\unit_testing_unit_testing\host\IES2608\tests\modules\ntn_service\app.ntn_service.logic\build.log
+2026-05-13 15:24:28,048 - twister - ERROR - CMake build failure: C:\Users\golde\Documents\NTNU\IES2608\tests\modules\modem_service for unit_testing/unit_testing
+2026-05-13 15:24:28,053 - twister - ERROR - unit_testing/unit_testing app.modem_service.logic                            [31mERROR[39m: CMake build failure
+2026-05-13 15:24:28,054 - twister - INFO - C:\Users\golde\Documents\NTNU\IES2608\twister-out\unit_testing_unit_testing\host\IES2608\tests\modules\modem_service\app.modem_service.logic\build.log
+2026-05-13 15:24:28,065 - twister - ERROR - Loading Zephyr module(s) (Zephyr base): unittest
+-- Found Python3: C:/ncs/toolchains/fd21892d0f/opt/bin/python.exe (found suitable version "3.12.4", minimum required is "3.10") found components: Interpreter 
+-- Cache files will be written to: C:/Users/golde/Documents/NTNU/ncs/v3.2.4/zephyr/.cache
+-- Found west (found suitable version "1.4.0", minimum required is "0.14.0")
+-- Board: unit_testing, qualifiers: unit_testing
+Parsing C:/Users/golde/Documents/NTNU/ncs/v3.2.4/zephyr/Kconfig
+
+Loaded configuration 'C:/Users/golde/Documents/NTNU/ncs/v3.2.4/zephyr/subsys/testsuite/boards/unit_testing/unit_testing/unit_testing_defconfig'
+
+Merged configuration 'C:/Users/golde/Documents/NTNU/IES2608/tests/modules/modem_service/prj.conf'
+
+Merged configuration 'C:/Users/golde/Documents/NTNU/IES2608/twister-out/unit_testing_unit_testing/host/IES2608/tests/modules/modem_service/app.modem_service.logic/zephyr/misc/generated/extra_kconfig_options.conf'
+
+Configuration saved to 'C:/Users/golde/Documents/NTNU/IES2608/twister-out/unit_testing_unit_testing/host/IES2608/tests/modules/modem_service/app.modem_service.logic/zephyr/.config'
+
+Kconfig header saved to 'C:/Users/golde/Documents/NTNU/IES2608/twister-out/unit_testing_unit_testing/host/IES2608/tests/modules/modem_service/app.modem_service.logic/zephyr/include/generated/zephyr/autoconf.h'
+
+-- Found host-tools: zephyr 0.17.0 (C:/ncs/toolchains/fd21892d0f/opt/zephyr-sdk)
+-- Found toolchain: host (gcc/ld)
+CMake Error at C:/Users/golde/Documents/NTNU/ncs/v3.2.4/zephyr/cmake/compiler/host-gcc/generic.cmake:5 (find_program):
+
+  Could not find CMAKE_C_COMPILER using the following names: gcc
+
+Call Stack (most recent call first):
+
+  C:/Users/golde/Documents/NTNU/ncs/v3.2.4/zephyr/cmake/modules/FindHostTools.cmake:113 (include)
+
+  C:/Users/golde/Documents/NTNU/ncs/v3.2.4/zephyr/cmake/modules/FindTargetTools.cmake:24 (find_package)
+
+  C:/Users/golde/Documents/NTNU/ncs/v3.2.4/zephyr/cmake/modules/unittest.cmake:18 (find_package)
+
+  C:/Users/golde/Documents/NTNU/ncs/v3.2.4/zephyr/share/zephyr-package/cmake/ZephyrConfig.cmake:75 (include)
+
+  C:/Users/golde/Documents/NTNU/ncs/v3.2.4/zephyr/share/zephyr-package/cmake/ZephyrConfig.cmake:92 (include_boilerplate)
+
+  CMakeLists.txt:9 (find_package)
+
+
+
+
+-- Configuring incomplete, errors occurred!
+
+2026-05-13 15:24:28,065 - twister - INFO - C:\Users\golde\Documents\NTNU\IES2608\twister-out\unit_testing_unit_testing\host\IES2608\tests\modules\modem_service\app.modem_service.logic\build.log
+2026-05-13 15:24:28,573 - twister - ERROR - CMake build failure: C:\Users\golde\Documents\NTNU\IES2608\tests\modules\lte_service for unit_testing/unit_testing
+2026-05-13 15:24:28,577 - twister - ERROR - unit_testing/unit_testing app.lte_service.logic                              [31mERROR[39m: CMake build failure
+2026-05-13 15:24:28,578 - twister - INFO - C:\Users\golde\Documents\NTNU\IES2608\twister-out\unit_testing_unit_testing\host\IES2608\tests\modules\lte_service\app.lte_service.logic\build.log
+2026-05-13 15:24:28,586 - twister - ERROR - Loading Zephyr module(s) (Zephyr base): unittest
+-- Found Python3: C:/ncs/toolchains/fd21892d0f/opt/bin/python.exe (found suitable version "3.12.4", minimum required is "3.10") found components: Interpreter 
+-- Cache files will be written to: C:/Users/golde/Documents/NTNU/ncs/v3.2.4/zephyr/.cache
+-- Found west (found suitable version "1.4.0", minimum required is "0.14.0")
+-- Board: unit_testing, qualifiers: unit_testing
+Parsing C:/Users/golde/Documents/NTNU/ncs/v3.2.4/zephyr/Kconfig
+
+Loaded configuration 'C:/Users/golde/Documents/NTNU/ncs/v3.2.4/zephyr/subsys/testsuite/boards/unit_testing/unit_testing/unit_testing_defconfig'
+
+Merged configuration 'C:/Users/golde/Documents/NTNU/IES2608/tests/modules/lte_service/prj.conf'
+
+Merged configuration 'C:/Users/golde/Documents/NTNU/IES2608/twister-out/unit_testing_unit_testing/host/IES2608/tests/modules/lte_service/app.lte_service.logic/zephyr/misc/generated/extra_kconfig_options.conf'
+
+Configuration saved to 'C:/Users/golde/Documents/NTNU/IES2608/twister-out/unit_testing_unit_testing/host/IES2608/tests/modules/lte_service/app.lte_service.logic/zephyr/.config'
+
+Kconfig header saved to 'C:/Users/golde/Documents/NTNU/IES2608/twister-out/unit_testing_unit_testing/host/IES2608/tests/modules/lte_service/app.lte_service.logic/zephyr/include/generated/zephyr/autoconf.h'
+
+-- Found host-tools: zephyr 0.17.0 (C:/ncs/toolchains/fd21892d0f/opt/zephyr-sdk)
+-- Found toolchain: host (gcc/ld)
+CMake Error at C:/Users/golde/Documents/NTNU/ncs/v3.2.4/zephyr/cmake/compiler/host-gcc/generic.cmake:5 (find_program):
+
+  Could not find CMAKE_C_COMPILER using the following names: gcc
+
+Call Stack (most recent call first):
+
+  C:/Users/golde/Documents/NTNU/ncs/v3.2.4/zephyr/cmake/modules/FindHostTools.cmake:113 (include)
+
+  C:/Users/golde/Documents/NTNU/ncs/v3.2.4/zephyr/cmake/modules/FindTargetTools.cmake:24 (find_package)
+
+  C:/Users/golde/Documents/NTNU/ncs/v3.2.4/zephyr/cmake/modules/unittest.cmake:18 (find_package)
+
+  C:/Users/golde/Documents/NTNU/ncs/v3.2.4/zephyr/share/zephyr-package/cmake/ZephyrConfig.cmake:75 (include)
+
+  C:/Users/golde/Documents/NTNU/ncs/v3.2.4/zephyr/share/zephyr-package/cmake/ZephyrConfig.cmake:92 (include_boilerplate)
+
+  CMakeLists.txt:9 (find_package)
+
+
+
+
+-- Configuring incomplete, errors occurred!
+
+2026-05-13 15:24:28,587 - twister - INFO - C:\Users\golde\Documents\NTNU\IES2608\twister-out\unit_testing_unit_testing\host\IES2608\tests\modules\lte_service\app.lte_service.logic\build.log
+2026-05-13 15:24:28,996 - twister - ERROR - CMake build failure: C:\Users\golde\Documents\NTNU\IES2608\tests\modules\gnss_service for unit_testing/unit_testing
+2026-05-13 15:24:29,000 - twister - ERROR - unit_testing/unit_testing app.gnss_service.logic                             [31mERROR[39m: CMake build failure
+2026-05-13 15:24:29,001 - twister - INFO - C:\Users\golde\Documents\NTNU\IES2608\twister-out\unit_testing_unit_testing\host\IES2608\tests\modules\gnss_service\app.gnss_service.logic\build.log
+2026-05-13 15:24:29,008 - twister - ERROR - Loading Zephyr module(s) (Zephyr base): unittest
+-- Found Python3: C:/ncs/toolchains/fd21892d0f/opt/bin/python.exe (found suitable version "3.12.4", minimum required is "3.10") found components: Interpreter 
+-- Cache files will be written to: C:/Users/golde/Documents/NTNU/ncs/v3.2.4/zephyr/.cache
+-- Found west (found suitable version "1.4.0", minimum required is "0.14.0")
+-- Board: unit_testing, qualifiers: unit_testing
+Parsing C:/Users/golde/Documents/NTNU/ncs/v3.2.4/zephyr/Kconfig
+
+Loaded configuration 'C:/Users/golde/Documents/NTNU/ncs/v3.2.4/zephyr/subsys/testsuite/boards/unit_testing/unit_testing/unit_testing_defconfig'
+
+Merged configuration 'C:/Users/golde/Documents/NTNU/IES2608/tests/modules/gnss_service/prj.conf'
+
+Merged configuration 'C:/Users/golde/Documents/NTNU/IES2608/twister-out/unit_testing_unit_testing/host/IES2608/tests/modules/gnss_service/app.gnss_service.logic/zephyr/misc/generated/extra_kconfig_options.conf'
+
+Configuration saved to 'C:/Users/golde/Documents/NTNU/IES2608/twister-out/unit_testing_unit_testing/host/IES2608/tests/modules/gnss_service/app.gnss_service.logic/zephyr/.config'
+
+Kconfig header saved to 'C:/Users/golde/Documents/NTNU/IES2608/twister-out/unit_testing_unit_testing/host/IES2608/tests/modules/gnss_service/app.gnss_service.logic/zephyr/include/generated/zephyr/autoconf.h'
+
+-- Found host-tools: zephyr 0.17.0 (C:/ncs/toolchains/fd21892d0f/opt/zephyr-sdk)
+-- Found toolchain: host (gcc/ld)
+CMake Error at C:/Users/golde/Documents/NTNU/ncs/v3.2.4/zephyr/cmake/compiler/host-gcc/generic.cmake:5 (find_program):
+
+  Could not find CMAKE_C_COMPILER using the following names: gcc
+
+Call Stack (most recent call first):
+
+  C:/Users/golde/Documents/NTNU/ncs/v3.2.4/zephyr/cmake/modules/FindHostTools.cmake:113 (include)
+
+  C:/Users/golde/Documents/NTNU/ncs/v3.2.4/zephyr/cmake/modules/FindTargetTools.cmake:24 (find_package)
+
+  C:/Users/golde/Documents/NTNU/ncs/v3.2.4/zephyr/cmake/modules/unittest.cmake:18 (find_package)
+
+  C:/Users/golde/Documents/NTNU/ncs/v3.2.4/zephyr/share/zephyr-package/cmake/ZephyrConfig.cmake:75 (include)
+
+  C:/Users/golde/Documents/NTNU/ncs/v3.2.4/zephyr/share/zephyr-package/cmake/ZephyrConfig.cmake:92 (include_boilerplate)
+
+  CMakeLists.txt:9 (find_package)
+
+
+
+
+-- Configuring incomplete, errors occurred!
+
+2026-05-13 15:24:29,008 - twister - INFO - C:\Users\golde\Documents\NTNU\IES2608\twister-out\unit_testing_unit_testing\host\IES2608\tests\modules\gnss_service\app.gnss_service.logic\build.log
+2026-05-13 15:24:41,881 - twister - DEBUG - Launched 32 jobs
+2026-05-13 15:24:41,949 - twister - INFO - 6 test scenarios (6 configurations) selected, 0 configurations filtered (0 by static filter, 0 at runtime).
+2026-05-13 15:24:41,950 - twister - INFO - [32m0 of 6[39m executed test configurations passed (0.00%), 0 built (not run), 0 failed, [31m6[39m errored, with no warnings in 37.28 seconds.
+2026-05-13 15:24:41,950 - twister - INFO - 0 of 45 executed test cases passed (0.00%), 45 errored on 1 out of total 1204 platforms (0.08%).
+2026-05-13 15:24:41,950 - twister - INFO - [32m0[39m test configurations executed on platforms, [36m6[39m test configurations were only built.
+2026-05-13 15:24:41,950 - twister - INFO - Saving reports...
+2026-05-13 15:24:41,950 - twister - INFO - Writing JSON report C:\Users\golde\Documents\NTNU\IES2608\twister-out\twister.json
+2026-05-13 15:24:41,955 - twister - INFO - Writing xunit report C:\Users\golde\Documents\NTNU\IES2608\twister-out\twister.xml...
+2026-05-13 15:24:41,973 - twister - INFO - Writing xunit report C:\Users\golde\Documents\NTNU\IES2608\twister-out\twister_report.xml...
+2026-05-13 15:24:42,097 - twister - INFO - -+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+2026-05-13 15:24:42,097 - twister - INFO - The following issues were found (showing the top 10 items):
+2026-05-13 15:24:42,097 - twister - INFO - 1) app.gnss_service.logic on unit_testing/unit_testing error (CMake build failure - CMake Error at C:/Users/golde/Documents/NTNU/ncs/v3.2.4/zephyr/cmake/compiler/host-gcc/generic.cmake:5 (find_program):   Could not find CMAKE_C_COMPILER using the following names: gcc)
+2026-05-13 15:24:42,097 - twister - INFO - 2) app.lte_service.logic on unit_testing/unit_testing error (CMake build failure - CMake Error at C:/Users/golde/Documents/NTNU/ncs/v3.2.4/zephyr/cmake/compiler/host-gcc/generic.cmake:5 (find_program):   Could not find CMAKE_C_COMPILER using the following names: gcc)
+2026-05-13 15:24:42,097 - twister - INFO - 3) app.modem_service.logic on unit_testing/unit_testing error (CMake build failure - CMake Error at C:/Users/golde/Documents/NTNU/ncs/v3.2.4/zephyr/cmake/compiler/host-gcc/generic.cmake:5 (find_program):   Could not find CMAKE_C_COMPILER using the following names: gcc)
+2026-05-13 15:24:42,098 - twister - INFO - 4) app.ntn_service.logic on unit_testing/unit_testing error (CMake build failure - CMake Error at C:/Users/golde/Documents/NTNU/ncs/v3.2.4/zephyr/cmake/compiler/host-gcc/generic.cmake:5 (find_program):   Could not find CMAKE_C_COMPILER using the following names: gcc)
+2026-05-13 15:24:42,098 - twister - INFO - 5) app.rsrp_service.logic on unit_testing/unit_testing error (CMake build failure - CMake Error at C:/Users/golde/Documents/NTNU/ncs/v3.2.4/zephyr/cmake/compiler/host-gcc/generic.cmake:5 (find_program):   Could not find CMAKE_C_COMPILER using the following names: gcc)
+2026-05-13 15:24:42,098 - twister - INFO - 6) app.sensors_service.logic on unit_testing/unit_testing error (CMake build failure - CMake Error at C:/Users/golde/Documents/NTNU/ncs/v3.2.4/zephyr/cmake/compiler/host-gcc/generic.cmake:5 (find_program):   Could not find CMAKE_C_COMPILER using the following names: gcc)
+2026-05-13 15:24:42,098 - twister - INFO - 
+2026-05-13 15:24:42,098 - twister - INFO - To rerun the tests, call twister using the following commandline:
+2026-05-13 15:24:42,098 - twister - INFO - west twister -p <PLATFORM> -s <TEST ID>, for example:
+2026-05-13 15:24:42,098 - twister - INFO - 
+2026-05-13 15:24:42,100 - twister - INFO - west twister -p unit_testing/unit_testing -s app.sensors_service.logic
+2026-05-13 15:24:42,100 - twister - INFO - or with west:
+2026-05-13 15:24:42,100 - twister - INFO - west build -p -b unit_testing/unit_testing tests\modules\sensors_service -T app.sensors_service.logic
+2026-05-13 15:24:42,100 - twister - INFO - -+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+2026-05-13 15:24:42,101 - twister - INFO - Run completed

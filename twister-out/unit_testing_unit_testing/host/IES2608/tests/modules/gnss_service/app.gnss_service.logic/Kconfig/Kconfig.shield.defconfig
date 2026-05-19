@@ -1,0 +1,2 @@
+osource "C:/Users/golde/Documents/NTNU/ncs/v3.2.4/zephyr/subsys/testsuite/boards/shields/*/Kconfig.defconfig"
+osource "C:/Users/golde/Documents/NTNU/ncs/v3.2.4/nrf/boards/shields/*/Kconfig.defconfig"

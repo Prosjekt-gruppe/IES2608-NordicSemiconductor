@@ -1,0 +1,2 @@
+"nrf":"C:/Users/golde/Documents/NTNU/ncs/v3.2.4/nrf":"C:/Users/golde/Documents/NTNU/ncs/v3.2.4/nrf/sysbuild"
+"mcuboot":"C:/Users/golde/Documents/NTNU/ncs/v3.2.4/bootloader/mcuboot":"C:/Users/golde/Documents/NTNU/ncs/v3.2.4/bootloader/mcuboot/boot/zephyr/sysbuild"

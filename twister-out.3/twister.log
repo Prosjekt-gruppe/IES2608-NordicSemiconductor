@@ -1,0 +1,159 @@
+2026-05-13 15:21:33,961 - twister - INFO - Using Ninja..
+2026-05-13 15:21:34,504 - twister - INFO - Zephyr version: ncs-v3.2.4
+2026-05-13 15:21:34,540 - twister - DEBUG - Running cmake script C:\Users\golde\Documents\NTNU\ncs\v3.2.4\zephyr\cmake\verify-toolchain.cmake
+2026-05-13 15:21:34,541 - twister - DEBUG - Calling cmake: ['C:\\ncs\\toolchains\\fd21892d0f\\opt\\bin\\cmake.EXE', '-DFORMAT=json', '-P', 'C:\\Users\\golde\\Documents\\NTNU\\ncs\\v3.2.4\\zephyr\\cmake\\verify-toolchain.cmake']
+2026-05-13 15:21:35,817 - twister - DEBUG - Finished running C:\Users\golde\Documents\NTNU\ncs\v3.2.4\zephyr\cmake\verify-toolchain.cmake
+2026-05-13 15:21:35,817 - twister - INFO - Using 'zephyr' toolchain.
+2026-05-13 15:21:38,471 - twister - DEBUG - Reading testsuite configuration files under C:\Users\golde\Documents\NTNU\IES2608\tests\modules...
+2026-05-13 15:21:38,481 - twister - DEBUG - Found possible testsuite in C:\Users\golde\Documents\NTNU\IES2608\tests\modules\gnss_service
+2026-05-13 15:21:38,485 - twister - DEBUG - Found possible testsuite in C:\Users\golde\Documents\NTNU\IES2608\tests\modules\lte_service
+2026-05-13 15:21:38,487 - twister - DEBUG - Found possible testsuite in C:\Users\golde\Documents\NTNU\IES2608\tests\modules\modem_service
+2026-05-13 15:21:38,490 - twister - DEBUG - Found possible testsuite in C:\Users\golde\Documents\NTNU\IES2608\tests\modules\ntn_service
+2026-05-13 15:21:38,492 - twister - DEBUG - Found possible testsuite in C:\Users\golde\Documents\NTNU\IES2608\tests\modules\rsrp_service
+2026-05-13 15:21:38,495 - twister - DEBUG - Found possible testsuite in C:\Users\golde\Documents\NTNU\IES2608\tests\modules\sensors_service
+2026-05-13 15:21:38,498 - twister - DEBUG - No duplicates found.
+2026-05-13 15:21:38,499 - twister - DEBUG -  platform filter: ['unit_testing']
+2026-05-13 15:21:38,499 - twister - DEBUG - platform_pattern: []
+2026-05-13 15:21:38,499 - twister - DEBUG -    vendor filter: []
+2026-05-13 15:21:38,499 - twister - DEBUG -      arch_filter: None
+2026-05-13 15:21:38,499 - twister - DEBUG -       tag_filter: None
+2026-05-13 15:21:38,499 - twister - DEBUG -      exclude_tag: None
+2026-05-13 15:21:38,499 - twister - DEBUG - Checking platform filter: ['unit_testing']
+2026-05-13 15:21:38,499 - twister - INFO - Building initial testsuite list...
+2026-05-13 15:21:38,506 - twister - INFO - Writing JSON report C:\Users\golde\Documents\NTNU\IES2608\twister-out\testplan.json
+2026-05-13 15:21:39,131 - twister - INFO - Adding tasks to the queue...
+2026-05-13 15:21:39,131 - twister - DEBUG - adding unit_testing/unit_testing\host\app.gnss_service.logic
+2026-05-13 15:21:39,135 - twister - DEBUG - adding unit_testing/unit_testing\host\app.lte_service.logic
+2026-05-13 15:21:39,135 - twister - DEBUG - adding unit_testing/unit_testing\host\app.modem_service.logic
+2026-05-13 15:21:39,135 - twister - DEBUG - adding unit_testing/unit_testing\host\app.ntn_service.logic
+2026-05-13 15:21:39,137 - twister - DEBUG - adding unit_testing/unit_testing\host\app.rsrp_service.logic
+2026-05-13 15:21:39,138 - twister - DEBUG - adding unit_testing/unit_testing\host\app.sensors_service.logic
+2026-05-13 15:21:39,138 - twister - INFO - Added initial list of jobs to queue
+2026-05-13 15:21:39,884 - twister - DEBUG - Running cmake on C:\Users\golde\Documents\NTNU\IES2608\tests\modules\sensors_service for unit_testing/unit_testing
+2026-05-13 15:21:39,893 - twister - DEBUG - Calling cmake: [None, '-BC:\\Users\\golde\\Documents\\NTNU\\IES2608\\twister-out\\unit_testing_unit_testing\\host\\IES2608\\tests\\modules\\sensors_service\\app.sensors_service.logic', '-DTC_RUNID=bc792589a951d0fa91f73d8c4aaa670b', '-DTC_NAME=app.sensors_service.logic', '-DCONFIG_COMPILER_WARNINGS_AS_ERRORS=y', '-DEXTRA_GEN_EDT_ARGS=--edtlib-Werror', '-GNinja', '-DPython3_EXECUTABLE=C:/ncs/toolchains/fd21892d0f/opt/bin/python.exe', '-DZEPHYR_TOOLCHAIN_VARIANT=host', '-SC:\\Users\\golde\\Documents\\NTNU\\IES2608\\tests\\modules\\sensors_service', '-DBOARD=unit_testing/unit_testing']
+2026-05-13 15:21:39,894 - twister - ERROR - General exception: expected str, bytes or os.PathLike object, not NoneType
+Traceback (most recent call last):
+  File "C:\Users\golde\Documents\NTNU\ncs\v3.2.4\zephyr\scripts/pylib/twister\twisterlib\runner.py", line 2009, in pipeline_mgr
+    pb.process(pipeline, done_queue, task, lock, results)
+  File "C:\Users\golde\Documents\NTNU\ncs\v3.2.4\zephyr\scripts/pylib/twister\twisterlib\runner.py", line 998, in process
+    ret = self.cmake()
+          ^^^^^^^^^^^^
+  File "C:\Users\golde\Documents\NTNU\ncs\v3.2.4\zephyr\scripts/pylib/twister\twisterlib\runner.py", line 1723, in cmake
+    return self.run_cmake(args,filter_stages)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\golde\Documents\NTNU\ncs\v3.2.4\zephyr\scripts/pylib/twister\twisterlib\runner.py", line 723, in run_cmake
+    p = subprocess.Popen(cmd, **kwargs)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "subprocess.py", line 1026, in __init__
+  File "subprocess.py", line 1462, in _execute_child
+  File "subprocess.py", line 608, in list2cmdline
+  File "<frozen os>", line 859, in fsdecode
+TypeError: expected str, bytes or os.PathLike object, not NoneType
+
+2026-05-13 15:21:40,449 - twister - DEBUG - Running cmake on C:\Users\golde\Documents\NTNU\IES2608\tests\modules\rsrp_service for unit_testing/unit_testing
+2026-05-13 15:21:40,458 - twister - DEBUG - Calling cmake: [None, '-BC:\\Users\\golde\\Documents\\NTNU\\IES2608\\twister-out\\unit_testing_unit_testing\\host\\IES2608\\tests\\modules\\rsrp_service\\app.rsrp_service.logic', '-DTC_RUNID=a63fd7b83ef9862326b3ff819a067cb3', '-DTC_NAME=app.rsrp_service.logic', '-DCONFIG_COMPILER_WARNINGS_AS_ERRORS=y', '-DEXTRA_GEN_EDT_ARGS=--edtlib-Werror', '-GNinja', '-DPython3_EXECUTABLE=C:/ncs/toolchains/fd21892d0f/opt/bin/python.exe', '-DZEPHYR_TOOLCHAIN_VARIANT=host', '-SC:\\Users\\golde\\Documents\\NTNU\\IES2608\\tests\\modules\\rsrp_service', '-DBOARD=unit_testing/unit_testing']
+2026-05-13 15:21:40,459 - twister - ERROR - General exception: expected str, bytes or os.PathLike object, not NoneType
+Traceback (most recent call last):
+  File "C:\Users\golde\Documents\NTNU\ncs\v3.2.4\zephyr\scripts/pylib/twister\twisterlib\runner.py", line 2009, in pipeline_mgr
+    pb.process(pipeline, done_queue, task, lock, results)
+  File "C:\Users\golde\Documents\NTNU\ncs\v3.2.4\zephyr\scripts/pylib/twister\twisterlib\runner.py", line 998, in process
+    ret = self.cmake()
+          ^^^^^^^^^^^^
+  File "C:\Users\golde\Documents\NTNU\ncs\v3.2.4\zephyr\scripts/pylib/twister\twisterlib\runner.py", line 1723, in cmake
+    return self.run_cmake(args,filter_stages)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\golde\Documents\NTNU\ncs\v3.2.4\zephyr\scripts/pylib/twister\twisterlib\runner.py", line 723, in run_cmake
+    p = subprocess.Popen(cmd, **kwargs)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "subprocess.py", line 1026, in __init__
+  File "subprocess.py", line 1462, in _execute_child
+  File "subprocess.py", line 608, in list2cmdline
+  File "<frozen os>", line 859, in fsdecode
+TypeError: expected str, bytes or os.PathLike object, not NoneType
+
+2026-05-13 15:21:41,209 - twister - DEBUG - Running cmake on C:\Users\golde\Documents\NTNU\IES2608\tests\modules\ntn_service for unit_testing/unit_testing
+2026-05-13 15:21:41,216 - twister - DEBUG - Calling cmake: [None, '-BC:\\Users\\golde\\Documents\\NTNU\\IES2608\\twister-out\\unit_testing_unit_testing\\host\\IES2608\\tests\\modules\\ntn_service\\app.ntn_service.logic', '-DTC_RUNID=dcda13f5113f21d69ae1405de034dd11', '-DTC_NAME=app.ntn_service.logic', '-DCONFIG_COMPILER_WARNINGS_AS_ERRORS=y', '-DEXTRA_GEN_EDT_ARGS=--edtlib-Werror', '-GNinja', '-DPython3_EXECUTABLE=C:/ncs/toolchains/fd21892d0f/opt/bin/python.exe', '-DZEPHYR_TOOLCHAIN_VARIANT=host', '-SC:\\Users\\golde\\Documents\\NTNU\\IES2608\\tests\\modules\\ntn_service', '-DBOARD=unit_testing/unit_testing']
+2026-05-13 15:21:41,219 - twister - ERROR - General exception: expected str, bytes or os.PathLike object, not NoneType
+Traceback (most recent call last):
+  File "C:\Users\golde\Documents\NTNU\ncs\v3.2.4\zephyr\scripts/pylib/twister\twisterlib\runner.py", line 2009, in pipeline_mgr
+    pb.process(pipeline, done_queue, task, lock, results)
+  File "C:\Users\golde\Documents\NTNU\ncs\v3.2.4\zephyr\scripts/pylib/twister\twisterlib\runner.py", line 998, in process
+    ret = self.cmake()
+          ^^^^^^^^^^^^
+  File "C:\Users\golde\Documents\NTNU\ncs\v3.2.4\zephyr\scripts/pylib/twister\twisterlib\runner.py", line 1723, in cmake
+    return self.run_cmake(args,filter_stages)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\golde\Documents\NTNU\ncs\v3.2.4\zephyr\scripts/pylib/twister\twisterlib\runner.py", line 723, in run_cmake
+    p = subprocess.Popen(cmd, **kwargs)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "subprocess.py", line 1026, in __init__
+  File "subprocess.py", line 1462, in _execute_child
+  File "subprocess.py", line 608, in list2cmdline
+  File "<frozen os>", line 859, in fsdecode
+TypeError: expected str, bytes or os.PathLike object, not NoneType
+
+2026-05-13 15:21:41,763 - twister - DEBUG - Running cmake on C:\Users\golde\Documents\NTNU\IES2608\tests\modules\modem_service for unit_testing/unit_testing
+2026-05-13 15:21:41,776 - twister - DEBUG - Calling cmake: [None, '-BC:\\Users\\golde\\Documents\\NTNU\\IES2608\\twister-out\\unit_testing_unit_testing\\host\\IES2608\\tests\\modules\\modem_service\\app.modem_service.logic', '-DTC_RUNID=1a9c075b4dd86e7b41ff97b1d22dffcf', '-DTC_NAME=app.modem_service.logic', '-DCONFIG_COMPILER_WARNINGS_AS_ERRORS=y', '-DEXTRA_GEN_EDT_ARGS=--edtlib-Werror', '-GNinja', '-DPython3_EXECUTABLE=C:/ncs/toolchains/fd21892d0f/opt/bin/python.exe', '-DZEPHYR_TOOLCHAIN_VARIANT=host', '-SC:\\Users\\golde\\Documents\\NTNU\\IES2608\\tests\\modules\\modem_service', '-DBOARD=unit_testing/unit_testing']
+2026-05-13 15:21:41,777 - twister - ERROR - General exception: expected str, bytes or os.PathLike object, not NoneType
+Traceback (most recent call last):
+  File "C:\Users\golde\Documents\NTNU\ncs\v3.2.4\zephyr\scripts/pylib/twister\twisterlib\runner.py", line 2009, in pipeline_mgr
+    pb.process(pipeline, done_queue, task, lock, results)
+  File "C:\Users\golde\Documents\NTNU\ncs\v3.2.4\zephyr\scripts/pylib/twister\twisterlib\runner.py", line 998, in process
+    ret = self.cmake()
+          ^^^^^^^^^^^^
+  File "C:\Users\golde\Documents\NTNU\ncs\v3.2.4\zephyr\scripts/pylib/twister\twisterlib\runner.py", line 1723, in cmake
+    return self.run_cmake(args,filter_stages)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\golde\Documents\NTNU\ncs\v3.2.4\zephyr\scripts/pylib/twister\twisterlib\runner.py", line 723, in run_cmake
+    p = subprocess.Popen(cmd, **kwargs)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "subprocess.py", line 1026, in __init__
+  File "subprocess.py", line 1462, in _execute_child
+  File "subprocess.py", line 608, in list2cmdline
+  File "<frozen os>", line 859, in fsdecode
+TypeError: expected str, bytes or os.PathLike object, not NoneType
+
+2026-05-13 15:21:42,565 - twister - DEBUG - Running cmake on C:\Users\golde\Documents\NTNU\IES2608\tests\modules\lte_service for unit_testing/unit_testing
+2026-05-13 15:21:42,574 - twister - DEBUG - Calling cmake: [None, '-BC:\\Users\\golde\\Documents\\NTNU\\IES2608\\twister-out\\unit_testing_unit_testing\\host\\IES2608\\tests\\modules\\lte_service\\app.lte_service.logic', '-DTC_RUNID=e177f9f3688b14606112e5b5fbdee58b', '-DTC_NAME=app.lte_service.logic', '-DCONFIG_COMPILER_WARNINGS_AS_ERRORS=y', '-DEXTRA_GEN_EDT_ARGS=--edtlib-Werror', '-GNinja', '-DPython3_EXECUTABLE=C:/ncs/toolchains/fd21892d0f/opt/bin/python.exe', '-DZEPHYR_TOOLCHAIN_VARIANT=host', '-SC:\\Users\\golde\\Documents\\NTNU\\IES2608\\tests\\modules\\lte_service', '-DBOARD=unit_testing/unit_testing']
+2026-05-13 15:21:42,575 - twister - ERROR - General exception: expected str, bytes or os.PathLike object, not NoneType
+Traceback (most recent call last):
+  File "C:\Users\golde\Documents\NTNU\ncs\v3.2.4\zephyr\scripts/pylib/twister\twisterlib\runner.py", line 2009, in pipeline_mgr
+    pb.process(pipeline, done_queue, task, lock, results)
+  File "C:\Users\golde\Documents\NTNU\ncs\v3.2.4\zephyr\scripts/pylib/twister\twisterlib\runner.py", line 998, in process
+    ret = self.cmake()
+          ^^^^^^^^^^^^
+  File "C:\Users\golde\Documents\NTNU\ncs\v3.2.4\zephyr\scripts/pylib/twister\twisterlib\runner.py", line 1723, in cmake
+    return self.run_cmake(args,filter_stages)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\golde\Documents\NTNU\ncs\v3.2.4\zephyr\scripts/pylib/twister\twisterlib\runner.py", line 723, in run_cmake
+    p = subprocess.Popen(cmd, **kwargs)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "subprocess.py", line 1026, in __init__
+  File "subprocess.py", line 1462, in _execute_child
+  File "subprocess.py", line 608, in list2cmdline
+  File "<frozen os>", line 859, in fsdecode
+TypeError: expected str, bytes or os.PathLike object, not NoneType
+
+2026-05-13 15:21:43,167 - twister - DEBUG - Running cmake on C:\Users\golde\Documents\NTNU\IES2608\tests\modules\gnss_service for unit_testing/unit_testing
+2026-05-13 15:21:43,179 - twister - DEBUG - Calling cmake: [None, '-BC:\\Users\\golde\\Documents\\NTNU\\IES2608\\twister-out\\unit_testing_unit_testing\\host\\IES2608\\tests\\modules\\gnss_service\\app.gnss_service.logic', '-DTC_RUNID=ebc382de5c6b389d7807c2f194ba6b9c', '-DTC_NAME=app.gnss_service.logic', '-DCONFIG_COMPILER_WARNINGS_AS_ERRORS=y', '-DEXTRA_GEN_EDT_ARGS=--edtlib-Werror', '-GNinja', '-DPython3_EXECUTABLE=C:/ncs/toolchains/fd21892d0f/opt/bin/python.exe', '-DZEPHYR_TOOLCHAIN_VARIANT=host', '-SC:\\Users\\golde\\Documents\\NTNU\\IES2608\\tests\\modules\\gnss_service', '-DBOARD=unit_testing/unit_testing']
+2026-05-13 15:21:43,181 - twister - ERROR - General exception: expected str, bytes or os.PathLike object, not NoneType
+Traceback (most recent call last):
+  File "C:\Users\golde\Documents\NTNU\ncs\v3.2.4\zephyr\scripts/pylib/twister\twisterlib\runner.py", line 2009, in pipeline_mgr
+    pb.process(pipeline, done_queue, task, lock, results)
+  File "C:\Users\golde\Documents\NTNU\ncs\v3.2.4\zephyr\scripts/pylib/twister\twisterlib\runner.py", line 998, in process
+    ret = self.cmake()
+          ^^^^^^^^^^^^
+  File "C:\Users\golde\Documents\NTNU\ncs\v3.2.4\zephyr\scripts/pylib/twister\twisterlib\runner.py", line 1723, in cmake
+    return self.run_cmake(args,filter_stages)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\golde\Documents\NTNU\ncs\v3.2.4\zephyr\scripts/pylib/twister\twisterlib\runner.py", line 723, in run_cmake
+    p = subprocess.Popen(cmd, **kwargs)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "subprocess.py", line 1026, in __init__
+  File "subprocess.py", line 1462, in _execute_child
+  File "subprocess.py", line 608, in list2cmdline
+  File "<frozen os>", line 859, in fsdecode
+TypeError: expected str, bytes or os.PathLike object, not NoneType
+
+2026-05-13 15:22:06,717 - twister - DEBUG - Launched 32 jobs
+2026-05-13 15:22:06,717 - twister - ERROR - Process 27024 failed, aborting execution

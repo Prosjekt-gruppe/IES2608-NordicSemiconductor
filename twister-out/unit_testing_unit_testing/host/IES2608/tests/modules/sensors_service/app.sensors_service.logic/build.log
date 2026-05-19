@@ -1,0 +1,25 @@
+Loading Zephyr module(s) (Zephyr base): unittest
+-- Found Python3: C:/ncs/toolchains/fd21892d0f/opt/bin/python.exe (found suitable version "3.12.4", minimum required is "3.10") found components: Interpreter 
+-- Cache files will be written to: C:/Users/golde/Documents/NTNU/ncs/v3.2.4/zephyr/.cache
+-- Found west (found suitable version "1.4.0", minimum required is "0.14.0")
+-- Board: unit_testing, qualifiers: unit_testing
+Parsing C:/Users/golde/Documents/NTNU/ncs/v3.2.4/zephyr/Kconfig
+Loaded configuration 'C:/Users/golde/Documents/NTNU/ncs/v3.2.4/zephyr/subsys/testsuite/boards/unit_testing/unit_testing/unit_testing_defconfig'
+Merged configuration 'C:/Users/golde/Documents/NTNU/IES2608/tests/modules/sensors_service/prj.conf'
+Merged configuration 'C:/Users/golde/Documents/NTNU/IES2608/twister-out/unit_testing_unit_testing/host/IES2608/tests/modules/sensors_service/app.sensors_service.logic/zephyr/misc/generated/extra_kconfig_options.conf'
+Configuration saved to 'C:/Users/golde/Documents/NTNU/IES2608/twister-out/unit_testing_unit_testing/host/IES2608/tests/modules/sensors_service/app.sensors_service.logic/zephyr/.config'
+Kconfig header saved to 'C:/Users/golde/Documents/NTNU/IES2608/twister-out/unit_testing_unit_testing/host/IES2608/tests/modules/sensors_service/app.sensors_service.logic/zephyr/include/generated/zephyr/autoconf.h'
+-- Found host-tools: zephyr 0.17.0 (C:/ncs/toolchains/fd21892d0f/opt/zephyr-sdk)
+-- Found toolchain: host (gcc/ld)
+CMake Error at C:/Users/golde/Documents/NTNU/ncs/v3.2.4/zephyr/cmake/compiler/host-gcc/generic.cmake:5 (find_program):
+  Could not find CMAKE_C_COMPILER using the following names: gcc
+Call Stack (most recent call first):
+  C:/Users/golde/Documents/NTNU/ncs/v3.2.4/zephyr/cmake/modules/FindHostTools.cmake:113 (include)
+  C:/Users/golde/Documents/NTNU/ncs/v3.2.4/zephyr/cmake/modules/FindTargetTools.cmake:24 (find_package)
+  C:/Users/golde/Documents/NTNU/ncs/v3.2.4/zephyr/cmake/modules/unittest.cmake:18 (find_package)
+  C:/Users/golde/Documents/NTNU/ncs/v3.2.4/zephyr/share/zephyr-package/cmake/ZephyrConfig.cmake:75 (include)
+  C:/Users/golde/Documents/NTNU/ncs/v3.2.4/zephyr/share/zephyr-package/cmake/ZephyrConfig.cmake:92 (include_boilerplate)
+  CMakeLists.txt:9 (find_package)
+
+
+-- Configuring incomplete, errors occurred!
